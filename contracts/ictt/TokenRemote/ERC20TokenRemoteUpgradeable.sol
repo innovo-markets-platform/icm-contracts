@@ -20,6 +20,9 @@ import {ERC20Upgradeable} from
 import {SafeERC20TransferFrom} from "@utilities/SafeERC20TransferFrom.sol";
 import {CallUtils} from "@utilities/CallUtils.sol";
 import {ICMInitializable} from "@utilities/ICMInitializable.sol";
+import {ERC2771Recipient} from "../interfaces/ERC2771Recipient.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {ContextUpgradeable} from "@openzeppelin/contracts-upgradeable@5.0.2/utils/ContextUpgradeable.sol";
 
 /**
  * @title ERC20TokenRemoteUpgradeable
@@ -27,7 +30,13 @@ import {ICMInitializable} from "@utilities/ICMInitializable.sol";
  * and represents the received tokens with an ERC20 token on this chain.
  * @custom:security-contact https://github.com/ava-labs/icm-contracts/blob/main/SECURITY.md
  */
-contract ERC20TokenRemoteUpgradeable is IERC20TokenTransferrer, ERC20Upgradeable, TokenRemote {
+contract ERC20TokenRemoteUpgradeable is 
+    IERC20TokenTransferrer, 
+    ERC20Upgradeable, 
+    TokenRemote,
+    ERC2771Recipient {
+    using ECDSA for bytes32;
+    
     // solhint-disable private-vars-leading-underscore
     /**
      * @dev Namespace storage slots following the ERC-7201 standard to prevent
@@ -46,6 +55,14 @@ contract ERC20TokenRemoteUpgradeable is IERC20TokenTransferrer, ERC20Upgradeable
      */
     bytes32 public constant ERC20_TOKEN_REMOTE_STORAGE_LOCATION =
         0x9b9029a3537fcf0e984763da4ac33bbf592a3462819171bf424e91cf62622300;
+
+    // Debug events for logging
+    event DebugSendCalled(address indexed sender, uint256 amount);
+    event DebugBurnCalled(address indexed sender, uint256 amount);
+    event DebugSpendAllowanceCalled(address indexed owner, address indexed spender, uint256 amount, uint256 currentAllowance);
+    event DebugAllowanceCheck(address indexed owner, address indexed spender, uint256 required, uint256 available);
+
+
 
     // solhint-disable ordering
     function _getERC20TokenRemoteStorage()
@@ -74,14 +91,16 @@ contract ERC20TokenRemoteUpgradeable is IERC20TokenTransferrer, ERC20Upgradeable
      * @param tokenName The name of the ERC20 token.
      * @param tokenSymbol The symbol of the ERC20 token.
      * @param tokenDecimals The number of decimals for the ERC20 token.
+     * @param forwarder The trusted forwarder address for gasless transactions.
      */
     function initialize(
         TokenRemoteSettings memory settings,
         string memory tokenName,
         string memory tokenSymbol,
-        uint8 tokenDecimals
+        uint8 tokenDecimals,
+        address forwarder
     ) public initializer {
-        __ERC20TokenRemote_init(settings, tokenName, tokenSymbol, tokenDecimals);
+        __ERC20TokenRemote_init(settings, tokenName, tokenSymbol, tokenDecimals, forwarder);
     }
 
     // solhint-disable-next-line func-name-mixedcase
@@ -89,18 +108,21 @@ contract ERC20TokenRemoteUpgradeable is IERC20TokenTransferrer, ERC20Upgradeable
         TokenRemoteSettings memory settings,
         string memory tokenName,
         string memory tokenSymbol,
-        uint8 tokenDecimals
+        uint8 tokenDecimals,
+        address forwarder
     ) internal onlyInitializing {
         __ERC20_init(tokenName, tokenSymbol);
         __TokenRemote_init(settings, 0, tokenDecimals);
-        __ERC20TokenRemote_init_unchained(tokenDecimals);
+        __ERC20TokenRemote_init_unchained(tokenDecimals, forwarder);
     }
 
     // solhint-disable-next-line func-name-mixedcase
     function __ERC20TokenRemote_init_unchained(
-        uint8 tokenDecimals
+        uint8 tokenDecimals,
+        address forwarder
     ) internal {
         _getERC20TokenRemoteStorage()._decimals = tokenDecimals;
+        _setTrustedForwarder(forwarder);
     }
     // solhint-enable ordering
 
@@ -112,8 +134,14 @@ contract ERC20TokenRemoteUpgradeable is IERC20TokenTransferrer, ERC20Upgradeable
      * first to check for token transfer balance, and then routed to the final destination TokenRemote instance.
      */
     function send(SendTokensInput calldata input, uint256 amount) external {
+        emit DebugSendCalled(_msgSender(), amount);
+        // For gasless transactions, we need to ensure _msgSender() returns the correct sender
+        // The _send function will use _msgSender() internally, which should now work correctly
+        // with our ERC2771Recipient override
         _send(input, amount);
     }
+
+
 
     /**
      * @dev See {IERC20TokenTransferrer-sendAndCall}
@@ -152,9 +180,35 @@ contract ERC20TokenRemoteUpgradeable is IERC20TokenTransferrer, ERC20Upgradeable
     function _burn(
         uint256 amount
     ) internal virtual override returns (uint256) {
+        emit DebugBurnCalled(_msgSender(), amount);
         _spendAllowance(_msgSender(), address(this), amount);
         _burn(_msgSender(), amount);
         return amount;
+    }
+    
+    /**
+     * @dev Override approve to add debug logging
+     */
+    function approve(address spender, uint256 value) public virtual override returns (bool) {
+        return super.approve(spender, value);
+    }
+
+    /**
+     * @dev Override _spendAllowance to add debug logging
+     */
+    function _spendAllowance(address owner, address spender, uint256 value) internal virtual override {
+        uint256 currentAllowance = allowance(owner, spender);
+        emit DebugSpendAllowanceCalled(owner, spender, value, currentAllowance);
+        
+        if (currentAllowance != type(uint256).max) {
+            if (currentAllowance < value) {
+                emit DebugAllowanceCheck(owner, spender, value, currentAllowance);
+                revert ERC20InsufficientAllowance(spender, currentAllowance, value);
+            }
+            unchecked {
+                _approve(owner, spender, currentAllowance - value, false);
+            }
+        }
     }
 
     /**
@@ -234,5 +288,19 @@ contract ERC20TokenRemoteUpgradeable is IERC20TokenTransferrer, ERC20Upgradeable
         }
         return
             SafeERC20TransferFrom.safeTransferFrom(IERC20(feeTokenAddress), _msgSender(), feeAmount);
+    }
+
+    /**
+     * @dev Override _msgSender to use ERC2771Recipient implementation
+     */
+    function _msgSender() internal view virtual override(ContextUpgradeable, ERC2771Recipient) returns (address) {
+        return ERC2771Recipient._msgSender();
+    }
+
+    /**
+     * @dev Override _msgData to use ERC2771Recipient implementation
+     */
+    function _msgData() internal view virtual override(ContextUpgradeable, ERC2771Recipient) returns (bytes calldata) {
+        return ERC2771Recipient._msgData();
     }
 }
