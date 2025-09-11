@@ -8,6 +8,7 @@ pragma solidity 0.8.25;
 import {TokenRemote} from "./TokenRemote.sol";
 import {TokenRemoteSettings} from "./interfaces/ITokenRemote.sol";
 import {IERC20TokenTransferrer} from "../interfaces/IERC20TokenTransferrer.sol";
+import {IERC20TokenRemoteLockable} from "../interfaces/IERC20TokenRemoteLockable.sol";
 import {IERC20SendAndCallReceiver} from "../interfaces/IERC20SendAndCallReceiver.sol";
 import {
     SendTokensInput,
@@ -15,6 +16,7 @@ import {
     SingleHopCallMessage
 } from "../interfaces/ITokenTransferrer.sol";
 import {IERC20} from "@openzeppelin/contracts@5.0.2/token/ERC20/ERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts@5.0.2/token/ERC20/extensions/IERC20Metadata.sol";
 import {ERC20Upgradeable} from
     "@openzeppelin/contracts-upgradeable@5.0.2/token/ERC20/ERC20Upgradeable.sol";
 import {SafeERC20TransferFrom} from "@utilities/SafeERC20TransferFrom.sol";
@@ -31,7 +33,7 @@ import {ContextUpgradeable} from "@openzeppelin/contracts-upgradeable@5.0.2/util
  * @custom:security-contact https://github.com/ava-labs/icm-contracts/blob/main/SECURITY.md
  */
 contract ERC20TokenRemoteUpgradeable is 
-    IERC20TokenTransferrer, 
+    IERC20TokenRemoteLockable, 
     ERC20Upgradeable, 
     TokenRemote,
     ERC2771Recipient {
@@ -46,6 +48,7 @@ contract ERC20TokenRemoteUpgradeable is
      */
     struct ERC20TokenRemoteStorage {
         uint8 _decimals;
+        mapping(address => uint256) _lockedAmounts;
     }
     // solhint-enable private-vars-leading-underscore
 
@@ -61,6 +64,8 @@ contract ERC20TokenRemoteUpgradeable is
     event DebugBurnCalled(address indexed sender, uint256 amount);
     event DebugSpendAllowanceCalled(address indexed owner, address indexed spender, uint256 amount, uint256 currentAllowance);
     event DebugAllowanceCheck(address indexed owner, address indexed spender, uint256 required, uint256 available);
+
+    // Token locking events and errors are now defined in IERC20TokenRemoteLockable interface
 
 
 
@@ -135,6 +140,8 @@ contract ERC20TokenRemoteUpgradeable is
      */
     function send(SendTokensInput calldata input, uint256 amount) external {
         emit DebugSendCalled(_msgSender(), amount);
+        // Check if sender has sufficient available balance (not locked)
+        _requireSufficientAvailableBalance(_msgSender(), amount);
         // For gasless transactions, we need to ensure _msgSender() returns the correct sender
         // The _send function will use _msgSender() internally, which should now work correctly
         // with our ERC2771Recipient override
@@ -147,13 +154,15 @@ contract ERC20TokenRemoteUpgradeable is
      * @dev See {IERC20TokenTransferrer-sendAndCall}
      */
     function sendAndCall(SendAndCallInput calldata input, uint256 amount) external {
+        // Check if sender has sufficient available balance (not locked)
+        _requireSufficientAvailableBalance(_msgSender(), amount);
         _sendAndCall(input, amount);
     }
 
     /**
      * @dev See {ERC20-decimals}
      */
-    function decimals() public view override returns (uint8) {
+    function decimals() public view override(ERC20Upgradeable, IERC20Metadata) returns (uint8) {
         ERC20TokenRemoteStorage storage $ = _getERC20TokenRemoteStorage();
         return $._decimals;
     }
@@ -186,12 +195,6 @@ contract ERC20TokenRemoteUpgradeable is
         return amount;
     }
     
-    /**
-     * @dev Override approve to add debug logging
-     */
-    function approve(address spender, uint256 value) public virtual override returns (bool) {
-        return super.approve(spender, value);
-    }
 
     /**
      * @dev Override _spendAllowance to add debug logging
@@ -302,5 +305,102 @@ contract ERC20TokenRemoteUpgradeable is
      */
     function _msgData() internal view virtual override(ContextUpgradeable, ERC2771Recipient) returns (bytes calldata) {
         return ERC2771Recipient._msgData();
+    }
+
+    /**
+     * @dev Returns the amount of tokens locked for a given account
+     * @param account The account to check locked amount for
+     * @return The amount of tokens locked for the account
+     */
+    function getLockedAmount(address account) public view returns (uint256) {
+        ERC20TokenRemoteStorage storage $ = _getERC20TokenRemoteStorage();
+        return $._lockedAmounts[account];
+    }
+
+    /**
+     * @dev Returns the amount of tokens available for transfer for a given account
+     * @param account The account to check available amount for
+     * @return The amount of tokens available for transfer
+     */
+    function getAvailableAmount(address account) public view returns (uint256) {
+        uint256 balance = balanceOf(account);
+        uint256 locked = getLockedAmount(account);
+        return balance > locked ? balance - locked : 0;
+    }
+
+    /**
+     * @dev Locks a specified amount of tokens for the caller
+     * @param amount The amount of tokens to lock
+     */
+    function lockTokens(uint256 amount) external {
+        address account = _msgSender();
+        ERC20TokenRemoteStorage storage $ = _getERC20TokenRemoteStorage();
+        
+        if (amount == 0) revert AmountMustBeGreaterThanZero();
+        if (balanceOf(account) < amount) revert InsufficientBalanceToLock();
+        
+        $._lockedAmounts[account] += amount;
+        
+        emit TokensLocked(account, amount, $._lockedAmounts[account]);
+    }
+
+    /**
+     * @dev Unlocks a specified amount of tokens for the caller
+     * @param amount The amount of tokens to unlock
+     */
+    function unlockTokens(uint256 amount) external {
+        address account = _msgSender();
+        ERC20TokenRemoteStorage storage $ = _getERC20TokenRemoteStorage();
+        
+        if (amount == 0) revert AmountMustBeGreaterThanZero();
+        if ($._lockedAmounts[account] < amount) revert InsufficientLockedAmountToUnlock();
+        
+        $._lockedAmounts[account] -= amount;
+        
+        emit TokensUnlocked(account, amount, $._lockedAmounts[account]);
+    }
+
+    /**
+     * @dev Override transfer to respect locked amounts
+     */
+    function transfer(address to, uint256 value) public virtual override(ERC20Upgradeable, IERC20TokenRemoteLockable) returns (bool) {
+        address owner = _msgSender();
+        _requireSufficientAvailableBalance(owner, value);
+        _transfer(owner, to, value);
+        return true;
+    }
+
+    /**
+     * @dev Override transferFrom to respect locked amounts
+     */
+    function transferFrom(address from, address to, uint256 value) public virtual override(ERC20Upgradeable, IERC20TokenRemoteLockable) returns (bool) {
+        _requireSufficientAvailableBalance(from, value);
+        _spendAllowance(from, _msgSender(), value);
+        _transfer(from, to, value);
+        return true;
+    }
+
+    /**
+     * @dev Override approve to respect locked amounts when setting allowance
+     * Users can only approve tokens that are available (not locked)
+     */
+    function approve(address spender, uint256 value) public virtual override(ERC20Upgradeable, IERC20TokenRemoteLockable) returns (bool) {
+        address owner = _msgSender();
+        // Allow approving up to available balance (unlocked tokens)
+        // This prevents confusing situations where approvals exist but transfers fail
+        uint256 availableBalance = getAvailableAmount(owner);
+        if (value > availableBalance) revert CannotApproveMoreThanAvailableBalance();
+        _approve(owner, spender, value);
+        return true;
+    }
+
+    /**
+     * @dev Internal function to check if account has sufficient available balance
+     * @param account The account to check
+     * @param amount The amount to check against
+     */
+    function _requireSufficientAvailableBalance(address account, uint256 amount) internal view {
+        uint256 available = getAvailableAmount(account);
+        if (available < amount) revert InsufficientAvailableBalance();
     }
 }
