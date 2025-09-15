@@ -295,11 +295,11 @@ contract ERC20TokenRemoteUpgradeable is
   function _update(address from, address to, uint256 value) internal override {
     // Check token locking constraints before any operation that reduces balance
     if (from != address(0)) {
-      address tokenLocker = configContract.erc20TokenLockerAddress();
+      address tokenLocker = configContract.erc20TokenLockerAddress(IConfigs.CurrencyType.USDC);
 
       if (tokenLocker != address(0)) {
         uint256 available = balanceOf(from) - ITokenLockerERC20(tokenLocker).getTotalLockedAmount(from);
-        if(value > available) {
+        if (value > available) {
           revert InsufficientUnlockedBalance();
         }
       }
