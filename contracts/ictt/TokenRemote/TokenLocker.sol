@@ -1,5 +1,4 @@
 // Sources flattened with hardhat v2.26.3 https://hardhat.org
-
 // SPDX-License-Identifier: MIT
 
 // File @openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol@v5.4.0
@@ -60,193 +59,933 @@ pragma solidity 0.8.25;
  * ====
  */
 abstract contract Initializable {
-  /**
-   * @dev Storage of the initializable contract.
-   *
-   * It's implemented on a custom ERC-7201 namespace to reduce the risk of storage collisions
-   * when using with upgradeable contracts.
-   *
-   * @custom:storage-location erc7201:openzeppelin.storage.Initializable
-   */
-  struct InitializableStorage {
     /**
-     * @dev Indicates that the contract has been initialized.
+     * @dev Storage of the initializable contract.
+     *
+     * It's implemented on a custom ERC-7201 namespace to reduce the risk of storage collisions
+     * when using with upgradeable contracts.
+     *
+     * @custom:storage-location erc7201:openzeppelin.storage.Initializable
      */
-    uint64 _initialized;
+    struct InitializableStorage {
+        /**
+         * @dev Indicates that the contract has been initialized.
+         */
+        uint64 _initialized;
+        /**
+         * @dev Indicates that the contract is in the process of being initialized.
+         */
+        bool _initializing;
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("openzeppelin.storage.Initializable")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant INITIALIZABLE_STORAGE = 0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00;
+
     /**
-     * @dev Indicates that the contract is in the process of being initialized.
+     * @dev The contract is already initialized.
      */
-    bool _initializing;
-  }
+    error InvalidInitialization();
 
-  // keccak256(abi.encode(uint256(keccak256("openzeppelin.storage.Initializable")) - 1)) & ~bytes32(uint256(0xff))
-  bytes32 private constant INITIALIZABLE_STORAGE = 0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00;
+    /**
+     * @dev The contract is not initializing.
+     */
+    error NotInitializing();
 
-  /**
-   * @dev The contract is already initialized.
-   */
-  error InvalidInitialization();
+    /**
+     * @dev Triggered when the contract has been initialized or reinitialized.
+     */
+    event Initialized(uint64 version);
 
-  /**
-   * @dev The contract is not initializing.
-   */
-  error NotInitializing();
+    /**
+     * @dev A modifier that defines a protected initializer function that can be invoked at most once. In its scope,
+     * `onlyInitializing` functions can be used to initialize parent contracts.
+     *
+     * Similar to `reinitializer(1)`, except that in the context of a constructor an `initializer` may be invoked any
+     * number of times. This behavior in the constructor can be useful during testing and is not expected to be used in
+     * production.
+     *
+     * Emits an {Initialized} event.
+     */
+    modifier initializer() {
+        // solhint-disable-next-line var-name-mixedcase
+        InitializableStorage storage $ = _getInitializableStorage();
 
-  /**
-   * @dev Triggered when the contract has been initialized or reinitialized.
-   */
-  event Initialized(uint64 version);
+        // Cache values to avoid duplicated sloads
+        bool isTopLevelCall = !$._initializing;
+        uint64 initialized = $._initialized;
 
-  /**
-   * @dev A modifier that defines a protected initializer function that can be invoked at most once. In its scope,
-   * `onlyInitializing` functions can be used to initialize parent contracts.
-   *
-   * Similar to `reinitializer(1)`, except that in the context of a constructor an `initializer` may be invoked any
-   * number of times. This behavior in the constructor can be useful during testing and is not expected to be used in
-   * production.
-   *
-   * Emits an {Initialized} event.
-   */
-  modifier initializer() {
+        // Allowed calls:
+        // - initialSetup: the contract is not in the initializing state and no previous version was
+        //                 initialized
+        // - construction: the contract is initialized at version 1 (no reinitialization) and the
+        //                 current contract is just being deployed
+        bool initialSetup = initialized == 0 && isTopLevelCall;
+        bool construction = initialized == 1 && address(this).code.length == 0;
+
+        if (!initialSetup && !construction) {
+            revert InvalidInitialization();
+        }
+        $._initialized = 1;
+        if (isTopLevelCall) {
+            $._initializing = true;
+        }
+        _;
+        if (isTopLevelCall) {
+            $._initializing = false;
+            emit Initialized(1);
+        }
+    }
+
+    /**
+     * @dev A modifier that defines a protected reinitializer function that can be invoked at most once, and only if the
+     * contract hasn't been initialized to a greater version before. In its scope, `onlyInitializing` functions can be
+     * used to initialize parent contracts.
+     *
+     * A reinitializer may be used after the original initialization step. This is essential to configure modules that
+     * are added through upgrades and that require initialization.
+     *
+     * When `version` is 1, this modifier is similar to `initializer`, except that functions marked with `reinitializer`
+     * cannot be nested. If one is invoked in the context of another, execution will revert.
+     *
+     * Note that versions can jump in increments greater than 1; this implies that if multiple reinitializers coexist in
+     * a contract, executing them in the right order is up to the developer or operator.
+     *
+     * WARNING: Setting the version to 2**64 - 1 will prevent any future reinitialization.
+     *
+     * Emits an {Initialized} event.
+     */
+    modifier reinitializer(uint64 version) {
+        // solhint-disable-next-line var-name-mixedcase
+        InitializableStorage storage $ = _getInitializableStorage();
+
+        if ($._initializing || $._initialized >= version) {
+            revert InvalidInitialization();
+        }
+        $._initialized = version;
+        $._initializing = true;
+        _;
+        $._initializing = false;
+        emit Initialized(version);
+    }
+
+    /**
+     * @dev Modifier to protect an initialization function so that it can only be invoked by functions with the
+     * {initializer} and {reinitializer} modifiers, directly or indirectly.
+     */
+    modifier onlyInitializing() {
+        _checkInitializing();
+        _;
+    }
+
+    /**
+     * @dev Reverts if the contract is not in an initializing state. See {onlyInitializing}.
+     */
+    function _checkInitializing() internal view virtual {
+        if (!_isInitializing()) {
+            revert NotInitializing();
+        }
+    }
+
+    /**
+     * @dev Locks the contract, preventing any future reinitialization. This cannot be part of an initializer call.
+     * Calling this in the constructor of a contract will prevent that contract from being initialized or reinitialized
+     * to any version. It is recommended to use this to lock implementation contracts that are designed to be called
+     * through proxies.
+     *
+     * Emits an {Initialized} event the first time it is successfully executed.
+     */
+    function _disableInitializers() internal virtual {
+        // solhint-disable-next-line var-name-mixedcase
+        InitializableStorage storage $ = _getInitializableStorage();
+
+        if ($._initializing) {
+            revert InvalidInitialization();
+        }
+        if ($._initialized != type(uint64).max) {
+            $._initialized = type(uint64).max;
+            emit Initialized(type(uint64).max);
+        }
+    }
+
+    /**
+     * @dev Returns the highest version that has been initialized. See {reinitializer}.
+     */
+    function _getInitializedVersion() internal view returns (uint64) {
+        return _getInitializableStorage()._initialized;
+    }
+
+    /**
+     * @dev Returns `true` if the contract is currently initializing. See {onlyInitializing}.
+     */
+    function _isInitializing() internal view returns (bool) {
+        return _getInitializableStorage()._initializing;
+    }
+
+    /**
+     * @dev Pointer to storage slot. Allows integrators to override it with a custom storage location.
+     *
+     * NOTE: Consider following the ERC-7201 formula to derive storage locations.
+     */
+    function _initializableStorageSlot() internal pure virtual returns (bytes32) {
+        return INITIALIZABLE_STORAGE;
+    }
+
+    /**
+     * @dev Returns a pointer to the storage namespace.
+     */
     // solhint-disable-next-line var-name-mixedcase
-    InitializableStorage storage $ = _getInitializableStorage();
-
-    // Cache values to avoid duplicated sloads
-    bool isTopLevelCall = !$._initializing;
-    uint64 initialized = $._initialized;
-
-    // Allowed calls:
-    // - initialSetup: the contract is not in the initializing state and no previous version was
-    //                 initialized
-    // - construction: the contract is initialized at version 1 (no reinitialization) and the
-    //                 current contract is just being deployed
-    bool initialSetup = initialized == 0 && isTopLevelCall;
-    bool construction = initialized == 1 && address(this).code.length == 0;
-
-    if (!initialSetup && !construction) {
-      revert InvalidInitialization();
+    function _getInitializableStorage() private pure returns (InitializableStorage storage $) {
+        bytes32 slot = _initializableStorageSlot();
+        assembly {
+            $.slot := slot
+        }
     }
-    $._initialized = 1;
-    if (isTopLevelCall) {
-      $._initializing = true;
-    }
-    _;
-    if (isTopLevelCall) {
-      $._initializing = false;
-      emit Initialized(1);
-    }
-  }
-
-  /**
-   * @dev A modifier that defines a protected reinitializer function that can be invoked at most once, and only if the
-   * contract hasn't been initialized to a greater version before. In its scope, `onlyInitializing` functions can be
-   * used to initialize parent contracts.
-   *
-   * A reinitializer may be used after the original initialization step. This is essential to configure modules that
-   * are added through upgrades and that require initialization.
-   *
-   * When `version` is 1, this modifier is similar to `initializer`, except that functions marked with `reinitializer`
-   * cannot be nested. If one is invoked in the context of another, execution will revert.
-   *
-   * Note that versions can jump in increments greater than 1; this implies that if multiple reinitializers coexist in
-   * a contract, executing them in the right order is up to the developer or operator.
-   *
-   * WARNING: Setting the version to 2**64 - 1 will prevent any future reinitialization.
-   *
-   * Emits an {Initialized} event.
-   */
-  modifier reinitializer(uint64 version) {
-    // solhint-disable-next-line var-name-mixedcase
-    InitializableStorage storage $ = _getInitializableStorage();
-
-    if ($._initializing || $._initialized >= version) {
-      revert InvalidInitialization();
-    }
-    $._initialized = version;
-    $._initializing = true;
-    _;
-    $._initializing = false;
-    emit Initialized(version);
-  }
-
-  /**
-   * @dev Modifier to protect an initialization function so that it can only be invoked by functions with the
-   * {initializer} and {reinitializer} modifiers, directly or indirectly.
-   */
-  modifier onlyInitializing() {
-    _checkInitializing();
-    _;
-  }
-
-  /**
-   * @dev Reverts if the contract is not in an initializing state. See {onlyInitializing}.
-   */
-  function _checkInitializing() internal view virtual {
-    if (!_isInitializing()) {
-      revert NotInitializing();
-    }
-  }
-
-  /**
-   * @dev Locks the contract, preventing any future reinitialization. This cannot be part of an initializer call.
-   * Calling this in the constructor of a contract will prevent that contract from being initialized or reinitialized
-   * to any version. It is recommended to use this to lock implementation contracts that are designed to be called
-   * through proxies.
-   *
-   * Emits an {Initialized} event the first time it is successfully executed.
-   */
-  function _disableInitializers() internal virtual {
-    // solhint-disable-next-line var-name-mixedcase
-    InitializableStorage storage $ = _getInitializableStorage();
-
-    if ($._initializing) {
-      revert InvalidInitialization();
-    }
-    if ($._initialized != type(uint64).max) {
-      $._initialized = type(uint64).max;
-      emit Initialized(type(uint64).max);
-    }
-  }
-
-  /**
-   * @dev Returns the highest version that has been initialized. See {reinitializer}.
-   */
-  function _getInitializedVersion() internal view returns (uint64) {
-    return _getInitializableStorage()._initialized;
-  }
-
-  /**
-   * @dev Returns `true` if the contract is currently initializing. See {onlyInitializing}.
-   */
-  function _isInitializing() internal view returns (bool) {
-    return _getInitializableStorage()._initializing;
-  }
-
-  /**
-   * @dev Pointer to storage slot. Allows integrators to override it with a custom storage location.
-   *
-   * NOTE: Consider following the ERC-7201 formula to derive storage locations.
-   */
-  function _initializableStorageSlot() internal pure virtual returns (bytes32) {
-    return INITIALIZABLE_STORAGE;
-  }
-
-  /**
-   * @dev Returns a pointer to the storage namespace.
-   */
-  // solhint-disable-next-line var-name-mixedcase
-  function _getInitializableStorage() private pure returns (InitializableStorage storage $) {
-    bytes32 slot = _initializableStorageSlot();
-    assembly {
-      $.slot := slot
-    }
-  }
 }
+
+
+// File @openzeppelin/contracts/interfaces/draft-IERC1822.sol@v5.4.0
+
+// Original license: SPDX_License_Identifier: MIT
+// OpenZeppelin Contracts (last updated v5.4.0) (interfaces/draft-IERC1822.sol)
+
+
+
+/**
+ * @dev ERC-1822: Universal Upgradeable Proxy Standard (UUPS) documents a method for upgradeability through a simplified
+ * proxy whose upgrades are fully controlled by the current implementation.
+ */
+interface IERC1822Proxiable {
+    /**
+     * @dev Returns the storage slot that the proxiable contract assumes is being used to store the implementation
+     * address.
+     *
+     * IMPORTANT: A proxy pointing at a proxiable contract should not be considered proxiable itself, because this risks
+     * bricking a proxy that upgrades to it, by delegating to itself until out of gas. Thus it is critical that this
+     * function revert if invoked through a proxy.
+     */
+    function proxiableUUID() external view returns (bytes32);
+}
+
+
+// File @openzeppelin/contracts/interfaces/IERC1967.sol@v5.4.0
+
+// Original license: SPDX_License_Identifier: MIT
+// OpenZeppelin Contracts (last updated v5.4.0) (interfaces/IERC1967.sol)
+
+
+/**
+ * @dev ERC-1967: Proxy Storage Slots. This interface contains the events defined in the ERC.
+ */
+interface IERC1967 {
+    /**
+     * @dev Emitted when the implementation is upgraded.
+     */
+    event Upgraded(address indexed implementation);
+
+    /**
+     * @dev Emitted when the admin account has changed.
+     */
+    event AdminChanged(address previousAdmin, address newAdmin);
+
+    /**
+     * @dev Emitted when the beacon is changed.
+     */
+    event BeaconUpgraded(address indexed beacon);
+}
+
+
+// File @openzeppelin/contracts/proxy/beacon/IBeacon.sol@v5.4.0
+
+// Original license: SPDX_License_Identifier: MIT
+// OpenZeppelin Contracts (last updated v5.4.0) (proxy/beacon/IBeacon.sol)
+
+
+
+/**
+ * @dev This is the interface that {BeaconProxy} expects of its beacon.
+ */
+interface IBeacon {
+    /**
+     * @dev Must return an address that can be used as a delegate call target.
+     *
+     * {UpgradeableBeacon} will check that this address is a contract.
+     */
+    function implementation() external view returns (address);
+}
+
+
+// File @openzeppelin/contracts/utils/Errors.sol@v5.4.0
+
+// Original license: SPDX_License_Identifier: MIT
+// OpenZeppelin Contracts (last updated v5.1.0) (utils/Errors.sol)
+
+
+
+/**
+ * @dev Collection of common custom errors used in multiple contracts
+ *
+ * IMPORTANT: Backwards compatibility is not guaranteed in future versions of the library.
+ * It is recommended to avoid relying on the error API for critical functionality.
+ *
+ * _Available since v5.1._
+ */
+library Errors {
+    /**
+     * @dev The ETH balance of the account is not enough to perform the operation.
+     */
+    error InsufficientBalance(uint256 balance, uint256 needed);
+
+    /**
+     * @dev A call to an address target failed. The target may have reverted.
+     */
+    error FailedCall();
+
+    /**
+     * @dev The deployment failed.
+     */
+    error FailedDeployment();
+
+    /**
+     * @dev A necessary precompile is missing.
+     */
+    error MissingPrecompile(address);
+}
+
+
+// File @openzeppelin/contracts/utils/Address.sol@v5.4.0
+
+// Original license: SPDX_License_Identifier: MIT
+// OpenZeppelin Contracts (last updated v5.4.0) (utils/Address.sol)
+
+
+
+/**
+ * @dev Collection of functions related to the address type
+ */
+library Address {
+    /**
+     * @dev There's no code at `target` (it is not a contract).
+     */
+    error AddressEmptyCode(address target);
+
+    /**
+     * @dev Replacement for Solidity's `transfer`: sends `amount` wei to
+     * `recipient`, forwarding all available gas and reverting on errors.
+     *
+     * https://eips.ethereum.org/EIPS/eip-1884[EIP1884] increases the gas cost
+     * of certain opcodes, possibly making contracts go over the 2300 gas limit
+     * imposed by `transfer`, making them unable to receive funds via
+     * `transfer`. {sendValue} removes this limitation.
+     *
+     * https://consensys.net/diligence/blog/2019/09/stop-using-soliditys-transfer-now/[Learn more].
+     *
+     * IMPORTANT: because control is transferred to `recipient`, care must be
+     * taken to not create reentrancy vulnerabilities. Consider using
+     * {ReentrancyGuard} or the
+     * https://solidity.readthedocs.io/en/v0.8.20/security-considerations.html#use-the-checks-effects-interactions-pattern[checks-effects-interactions pattern].
+     */
+    function sendValue(address payable recipient, uint256 amount) internal {
+        if (address(this).balance < amount) {
+            revert Errors.InsufficientBalance(address(this).balance, amount);
+        }
+
+        (bool success, bytes memory returndata) = recipient.call{value: amount}("");
+        if (!success) {
+            _revert(returndata);
+        }
+    }
+
+    /**
+     * @dev Performs a Solidity function call using a low level `call`. A
+     * plain `call` is an unsafe replacement for a function call: use this
+     * function instead.
+     *
+     * If `target` reverts with a revert reason or custom error, it is bubbled
+     * up by this function (like regular Solidity function calls). However, if
+     * the call reverted with no returned reason, this function reverts with a
+     * {Errors.FailedCall} error.
+     *
+     * Returns the raw returned data. To convert to the expected return value,
+     * use https://solidity.readthedocs.io/en/latest/units-and-global-variables.html?highlight=abi.decode#abi-encoding-and-decoding-functions[`abi.decode`].
+     *
+     * Requirements:
+     *
+     * - `target` must be a contract.
+     * - calling `target` with `data` must not revert.
+     */
+    function functionCall(address target, bytes memory data) internal returns (bytes memory) {
+        return functionCallWithValue(target, data, 0);
+    }
+
+    /**
+     * @dev Same as {xref-Address-functionCall-address-bytes-}[`functionCall`],
+     * but also transferring `value` wei to `target`.
+     *
+     * Requirements:
+     *
+     * - the calling contract must have an ETH balance of at least `value`.
+     * - the called Solidity function must be `payable`.
+     */
+    function functionCallWithValue(address target, bytes memory data, uint256 value) internal returns (bytes memory) {
+        if (address(this).balance < value) {
+            revert Errors.InsufficientBalance(address(this).balance, value);
+        }
+        (bool success, bytes memory returndata) = target.call{value: value}(data);
+        return verifyCallResultFromTarget(target, success, returndata);
+    }
+
+    /**
+     * @dev Same as {xref-Address-functionCall-address-bytes-}[`functionCall`],
+     * but performing a static call.
+     */
+    function functionStaticCall(address target, bytes memory data) internal view returns (bytes memory) {
+        (bool success, bytes memory returndata) = target.staticcall(data);
+        return verifyCallResultFromTarget(target, success, returndata);
+    }
+
+    /**
+     * @dev Same as {xref-Address-functionCall-address-bytes-}[`functionCall`],
+     * but performing a delegate call.
+     */
+    function functionDelegateCall(address target, bytes memory data) internal returns (bytes memory) {
+        (bool success, bytes memory returndata) = target.delegatecall(data);
+        return verifyCallResultFromTarget(target, success, returndata);
+    }
+
+    /**
+     * @dev Tool to verify that a low level call to smart-contract was successful, and reverts if the target
+     * was not a contract or bubbling up the revert reason (falling back to {Errors.FailedCall}) in case
+     * of an unsuccessful call.
+     */
+    function verifyCallResultFromTarget(
+        address target,
+        bool success,
+        bytes memory returndata
+    ) internal view returns (bytes memory) {
+        if (!success) {
+            _revert(returndata);
+        } else {
+            // only check if target is a contract if the call was successful and the return data is empty
+            // otherwise we already know that it was a contract
+            if (returndata.length == 0 && target.code.length == 0) {
+                revert AddressEmptyCode(target);
+            }
+            return returndata;
+        }
+    }
+
+    /**
+     * @dev Tool to verify that a low level call was successful, and reverts if it wasn't, either by bubbling the
+     * revert reason or with a default {Errors.FailedCall} error.
+     */
+    function verifyCallResult(bool success, bytes memory returndata) internal pure returns (bytes memory) {
+        if (!success) {
+            _revert(returndata);
+        } else {
+            return returndata;
+        }
+    }
+
+    /**
+     * @dev Reverts with returndata if present. Otherwise reverts with {Errors.FailedCall}.
+     */
+    function _revert(bytes memory returndata) private pure {
+        // Look for revert reason and bubble it up if present
+        if (returndata.length > 0) {
+            // The easiest way to bubble the revert reason is using memory via assembly
+            assembly ("memory-safe") {
+                revert(add(returndata, 0x20), mload(returndata))
+            }
+        } else {
+            revert Errors.FailedCall();
+        }
+    }
+}
+
+
+// File @openzeppelin/contracts/utils/StorageSlot.sol@v5.4.0
+
+// Original license: SPDX_License_Identifier: MIT
+// OpenZeppelin Contracts (last updated v5.1.0) (utils/StorageSlot.sol)
+// This file was procedurally generated from scripts/generate/templates/StorageSlot.js.
+
+
+
+/**
+ * @dev Library for reading and writing primitive types to specific storage slots.
+ *
+ * Storage slots are often used to avoid storage conflict when dealing with upgradeable contracts.
+ * This library helps with reading and writing to such slots without the need for inline assembly.
+ *
+ * The functions in this library return Slot structs that contain a `value` member that can be used to read or write.
+ *
+ * Example usage to set ERC-1967 implementation slot:
+ * ```solidity
+ * contract ERC1967 {
+ *     // Define the slot. Alternatively, use the SlotDerivation library to derive the slot.
+ *     bytes32 internal constant _IMPLEMENTATION_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+ *
+ *     function _getImplementation() internal view returns (address) {
+ *         return StorageSlot.getAddressSlot(_IMPLEMENTATION_SLOT).value;
+ *     }
+ *
+ *     function _setImplementation(address newImplementation) internal {
+ *         require(newImplementation.code.length > 0);
+ *         StorageSlot.getAddressSlot(_IMPLEMENTATION_SLOT).value = newImplementation;
+ *     }
+ * }
+ * ```
+ *
+ * TIP: Consider using this library along with {SlotDerivation}.
+ */
+library StorageSlot {
+    struct AddressSlot {
+        address value;
+    }
+
+    struct BooleanSlot {
+        bool value;
+    }
+
+    struct Bytes32Slot {
+        bytes32 value;
+    }
+
+    struct Uint256Slot {
+        uint256 value;
+    }
+
+    struct Int256Slot {
+        int256 value;
+    }
+
+    struct StringSlot {
+        string value;
+    }
+
+    struct BytesSlot {
+        bytes value;
+    }
+
+    /**
+     * @dev Returns an `AddressSlot` with member `value` located at `slot`.
+     */
+    function getAddressSlot(bytes32 slot) internal pure returns (AddressSlot storage r) {
+        assembly ("memory-safe") {
+            r.slot := slot
+        }
+    }
+
+    /**
+     * @dev Returns a `BooleanSlot` with member `value` located at `slot`.
+     */
+    function getBooleanSlot(bytes32 slot) internal pure returns (BooleanSlot storage r) {
+        assembly ("memory-safe") {
+            r.slot := slot
+        }
+    }
+
+    /**
+     * @dev Returns a `Bytes32Slot` with member `value` located at `slot`.
+     */
+    function getBytes32Slot(bytes32 slot) internal pure returns (Bytes32Slot storage r) {
+        assembly ("memory-safe") {
+            r.slot := slot
+        }
+    }
+
+    /**
+     * @dev Returns a `Uint256Slot` with member `value` located at `slot`.
+     */
+    function getUint256Slot(bytes32 slot) internal pure returns (Uint256Slot storage r) {
+        assembly ("memory-safe") {
+            r.slot := slot
+        }
+    }
+
+    /**
+     * @dev Returns a `Int256Slot` with member `value` located at `slot`.
+     */
+    function getInt256Slot(bytes32 slot) internal pure returns (Int256Slot storage r) {
+        assembly ("memory-safe") {
+            r.slot := slot
+        }
+    }
+
+    /**
+     * @dev Returns a `StringSlot` with member `value` located at `slot`.
+     */
+    function getStringSlot(bytes32 slot) internal pure returns (StringSlot storage r) {
+        assembly ("memory-safe") {
+            r.slot := slot
+        }
+    }
+
+    /**
+     * @dev Returns an `StringSlot` representation of the string storage pointer `store`.
+     */
+    function getStringSlot(string storage store) internal pure returns (StringSlot storage r) {
+        assembly ("memory-safe") {
+            r.slot := store.slot
+        }
+    }
+
+    /**
+     * @dev Returns a `BytesSlot` with member `value` located at `slot`.
+     */
+    function getBytesSlot(bytes32 slot) internal pure returns (BytesSlot storage r) {
+        assembly ("memory-safe") {
+            r.slot := slot
+        }
+    }
+
+    /**
+     * @dev Returns an `BytesSlot` representation of the bytes storage pointer `store`.
+     */
+    function getBytesSlot(bytes storage store) internal pure returns (BytesSlot storage r) {
+        assembly ("memory-safe") {
+            r.slot := store.slot
+        }
+    }
+}
+
+
+// File @openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol@v5.4.0
+
+// Original license: SPDX_License_Identifier: MIT
+// OpenZeppelin Contracts (last updated v5.4.0) (proxy/ERC1967/ERC1967Utils.sol)
+
+
+
+
+
+/**
+ * @dev This library provides getters and event emitting update functions for
+ * https://eips.ethereum.org/EIPS/eip-1967[ERC-1967] slots.
+ */
+library ERC1967Utils {
+    /**
+     * @dev Storage slot with the address of the current implementation.
+     * This is the keccak-256 hash of "eip1967.proxy.implementation" subtracted by 1.
+     */
+    // solhint-disable-next-line private-vars-leading-underscore
+    bytes32 internal constant IMPLEMENTATION_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+
+    /**
+     * @dev The `implementation` of the proxy is invalid.
+     */
+    error ERC1967InvalidImplementation(address implementation);
+
+    /**
+     * @dev The `admin` of the proxy is invalid.
+     */
+    error ERC1967InvalidAdmin(address admin);
+
+    /**
+     * @dev The `beacon` of the proxy is invalid.
+     */
+    error ERC1967InvalidBeacon(address beacon);
+
+    /**
+     * @dev An upgrade function sees `msg.value > 0` that may be lost.
+     */
+    error ERC1967NonPayable();
+
+    /**
+     * @dev Returns the current implementation address.
+     */
+    function getImplementation() internal view returns (address) {
+        return StorageSlot.getAddressSlot(IMPLEMENTATION_SLOT).value;
+    }
+
+    /**
+     * @dev Stores a new address in the ERC-1967 implementation slot.
+     */
+    function _setImplementation(address newImplementation) private {
+        if (newImplementation.code.length == 0) {
+            revert ERC1967InvalidImplementation(newImplementation);
+        }
+        StorageSlot.getAddressSlot(IMPLEMENTATION_SLOT).value = newImplementation;
+    }
+
+    /**
+     * @dev Performs implementation upgrade with additional setup call if data is nonempty.
+     * This function is payable only if the setup call is performed, otherwise `msg.value` is rejected
+     * to avoid stuck value in the contract.
+     *
+     * Emits an {IERC1967-Upgraded} event.
+     */
+    function upgradeToAndCall(address newImplementation, bytes memory data) internal {
+        _setImplementation(newImplementation);
+        emit IERC1967.Upgraded(newImplementation);
+
+        if (data.length > 0) {
+            Address.functionDelegateCall(newImplementation, data);
+        } else {
+            _checkNonPayable();
+        }
+    }
+
+    /**
+     * @dev Storage slot with the admin of the contract.
+     * This is the keccak-256 hash of "eip1967.proxy.admin" subtracted by 1.
+     */
+    // solhint-disable-next-line private-vars-leading-underscore
+    bytes32 internal constant ADMIN_SLOT = 0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103;
+
+    /**
+     * @dev Returns the current admin.
+     *
+     * TIP: To get this value clients can read directly from the storage slot shown below (specified by ERC-1967) using
+     * the https://eth.wiki/json-rpc/API#eth_getstorageat[`eth_getStorageAt`] RPC call.
+     * `0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103`
+     */
+    function getAdmin() internal view returns (address) {
+        return StorageSlot.getAddressSlot(ADMIN_SLOT).value;
+    }
+
+    /**
+     * @dev Stores a new address in the ERC-1967 admin slot.
+     */
+    function _setAdmin(address newAdmin) private {
+        if (newAdmin == address(0)) {
+            revert ERC1967InvalidAdmin(address(0));
+        }
+        StorageSlot.getAddressSlot(ADMIN_SLOT).value = newAdmin;
+    }
+
+    /**
+     * @dev Changes the admin of the proxy.
+     *
+     * Emits an {IERC1967-AdminChanged} event.
+     */
+    function changeAdmin(address newAdmin) internal {
+        emit IERC1967.AdminChanged(getAdmin(), newAdmin);
+        _setAdmin(newAdmin);
+    }
+
+    /**
+     * @dev The storage slot of the UpgradeableBeacon contract which defines the implementation for this proxy.
+     * This is the keccak-256 hash of "eip1967.proxy.beacon" subtracted by 1.
+     */
+    // solhint-disable-next-line private-vars-leading-underscore
+    bytes32 internal constant BEACON_SLOT = 0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50;
+
+    /**
+     * @dev Returns the current beacon.
+     */
+    function getBeacon() internal view returns (address) {
+        return StorageSlot.getAddressSlot(BEACON_SLOT).value;
+    }
+
+    /**
+     * @dev Stores a new beacon in the ERC-1967 beacon slot.
+     */
+    function _setBeacon(address newBeacon) private {
+        if (newBeacon.code.length == 0) {
+            revert ERC1967InvalidBeacon(newBeacon);
+        }
+
+        StorageSlot.getAddressSlot(BEACON_SLOT).value = newBeacon;
+
+        address beaconImplementation = IBeacon(newBeacon).implementation();
+        if (beaconImplementation.code.length == 0) {
+            revert ERC1967InvalidImplementation(beaconImplementation);
+        }
+    }
+
+    /**
+     * @dev Change the beacon and trigger a setup call if data is nonempty.
+     * This function is payable only if the setup call is performed, otherwise `msg.value` is rejected
+     * to avoid stuck value in the contract.
+     *
+     * Emits an {IERC1967-BeaconUpgraded} event.
+     *
+     * CAUTION: Invoking this function has no effect on an instance of {BeaconProxy} since v5, since
+     * it uses an immutable beacon without looking at the value of the ERC-1967 beacon slot for
+     * efficiency.
+     */
+    function upgradeBeaconToAndCall(address newBeacon, bytes memory data) internal {
+        _setBeacon(newBeacon);
+        emit IERC1967.BeaconUpgraded(newBeacon);
+
+        if (data.length > 0) {
+            Address.functionDelegateCall(IBeacon(newBeacon).implementation(), data);
+        } else {
+            _checkNonPayable();
+        }
+    }
+
+    /**
+     * @dev Reverts if `msg.value` is not zero. It can be used to avoid `msg.value` stuck in the contract
+     * if an upgrade doesn't perform an initialization call.
+     */
+    function _checkNonPayable() private {
+        if (msg.value > 0) {
+            revert ERC1967NonPayable();
+        }
+    }
+}
+
+
+// File @openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol@v5.4.0
+
+// Original license: SPDX_License_Identifier: MIT
+// OpenZeppelin Contracts (last updated v5.3.0) (proxy/utils/UUPSUpgradeable.sol)
+
+
+
+/**
+ * @dev An upgradeability mechanism designed for UUPS proxies. The functions included here can perform an upgrade of an
+ * {ERC1967Proxy}, when this contract is set as the implementation behind such a proxy.
+ *
+ * A security mechanism ensures that an upgrade does not turn off upgradeability accidentally, although this risk is
+ * reinstated if the upgrade retains upgradeability but removes the security mechanism, e.g. by replacing
+ * `UUPSUpgradeable` with a custom implementation of upgrades.
+ *
+ * The {_authorizeUpgrade} function must be overridden to include access restriction to the upgrade mechanism.
+ */
+abstract contract UUPSUpgradeable is Initializable, IERC1822Proxiable {
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
+    address private immutable __self = address(this);
+
+    /**
+     * @dev The version of the upgrade interface of the contract. If this getter is missing, both `upgradeTo(address)`
+     * and `upgradeToAndCall(address,bytes)` are present, and `upgradeTo` must be used if no function should be called,
+     * while `upgradeToAndCall` will invoke the `receive` function if the second argument is the empty byte string.
+     * If the getter returns `"5.0.0"`, only `upgradeToAndCall(address,bytes)` is present, and the second argument must
+     * be the empty byte string if no function should be called, making it impossible to invoke the `receive` function
+     * during an upgrade.
+     */
+    string public constant UPGRADE_INTERFACE_VERSION = "5.0.0";
+
+    /**
+     * @dev The call is from an unauthorized context.
+     */
+    error UUPSUnauthorizedCallContext();
+
+    /**
+     * @dev The storage `slot` is unsupported as a UUID.
+     */
+    error UUPSUnsupportedProxiableUUID(bytes32 slot);
+
+    /**
+     * @dev Check that the execution is being performed through a delegatecall call and that the execution context is
+     * a proxy contract with an implementation (as defined in ERC-1967) pointing to self. This should only be the case
+     * for UUPS and transparent proxies that are using the current contract as their implementation. Execution of a
+     * function through ERC-1167 minimal proxies (clones) would not normally pass this test, but is not guaranteed to
+     * fail.
+     */
+    modifier onlyProxy() {
+        _checkProxy();
+        _;
+    }
+
+    /**
+     * @dev Check that the execution is not being performed through a delegate call. This allows a function to be
+     * callable on the implementing contract but not through proxies.
+     */
+    modifier notDelegated() {
+        _checkNotDelegated();
+        _;
+    }
+
+    function __UUPSUpgradeable_init() internal onlyInitializing {
+    }
+
+    function __UUPSUpgradeable_init_unchained() internal onlyInitializing {
+    }
+    /**
+     * @dev Implementation of the ERC-1822 {proxiableUUID} function. This returns the storage slot used by the
+     * implementation. It is used to validate the implementation's compatibility when performing an upgrade.
+     *
+     * IMPORTANT: A proxy pointing at a proxiable contract should not be considered proxiable itself, because this risks
+     * bricking a proxy that upgrades to it, by delegating to itself until out of gas. Thus it is critical that this
+     * function revert if invoked through a proxy. This is guaranteed by the `notDelegated` modifier.
+     */
+    function proxiableUUID() external view virtual notDelegated returns (bytes32) {
+        return ERC1967Utils.IMPLEMENTATION_SLOT;
+    }
+
+    /**
+     * @dev Upgrade the implementation of the proxy to `newImplementation`, and subsequently execute the function call
+     * encoded in `data`.
+     *
+     * Calls {_authorizeUpgrade}.
+     *
+     * Emits an {Upgraded} event.
+     *
+     * @custom:oz-upgrades-unsafe-allow-reachable delegatecall
+     */
+    function upgradeToAndCall(address newImplementation, bytes memory data) public payable virtual onlyProxy {
+        _authorizeUpgrade(newImplementation);
+        _upgradeToAndCallUUPS(newImplementation, data);
+    }
+
+    /**
+     * @dev Reverts if the execution is not performed via delegatecall or the execution
+     * context is not of a proxy with an ERC-1967 compliant implementation pointing to self.
+     */
+    function _checkProxy() internal view virtual {
+        if (
+            address(this) == __self || // Must be called through delegatecall
+            ERC1967Utils.getImplementation() != __self // Must be called through an active proxy
+        ) {
+            revert UUPSUnauthorizedCallContext();
+        }
+    }
+
+    /**
+     * @dev Reverts if the execution is performed via delegatecall.
+     * See {notDelegated}.
+     */
+    function _checkNotDelegated() internal view virtual {
+        if (address(this) != __self) {
+            // Must not be called through delegatecall
+            revert UUPSUnauthorizedCallContext();
+        }
+    }
+
+    /**
+     * @dev Function that should revert when `msg.sender` is not authorized to upgrade the contract. Called by
+     * {upgradeToAndCall}.
+     *
+     * Normally, this function will use an xref:access.adoc[access control] modifier such as {Ownable-onlyOwner}.
+     *
+     * ```solidity
+     * function _authorizeUpgrade(address) internal onlyOwner {}
+     * ```
+     */
+    function _authorizeUpgrade(address newImplementation) internal virtual;
+
+    /**
+     * @dev Performs an implementation upgrade with a security check for UUPS proxies, and additional setup call.
+     *
+     * As a security check, {proxiableUUID} is invoked in the new implementation, and the return value
+     * is expected to be the implementation slot in ERC-1967.
+     *
+     * Emits an {IERC1967-Upgraded} event.
+     */
+    function _upgradeToAndCallUUPS(address newImplementation, bytes memory data) private {
+        try IERC1822Proxiable(newImplementation).proxiableUUID() returns (bytes32 slot) {
+            if (slot != ERC1967Utils.IMPLEMENTATION_SLOT) {
+                revert UUPSUnsupportedProxiableUUID(slot);
+            }
+            ERC1967Utils.upgradeToAndCall(newImplementation, data);
+        } catch {
+            // The implementation is not UUPS
+            revert ERC1967Utils.ERC1967InvalidImplementation(newImplementation);
+        }
+    }
+}
+
 
 // File @openzeppelin/contracts-upgradeable/utils/ContextUpgradeable.sol@v5.4.0
 
 // Original license: SPDX_License_Identifier: MIT
 // OpenZeppelin Contracts (last updated v5.0.1) (utils/Context.sol)
+
+
 
 /**
  * @dev Provides information about the current execution context, including the
@@ -259,403 +998,32 @@ abstract contract Initializable {
  * This contract is only required for intermediate, library-like contracts.
  */
 abstract contract ContextUpgradeable is Initializable {
-  function __Context_init() internal onlyInitializing {}
-
-  function __Context_init_unchained() internal onlyInitializing {}
-  function _msgSender() internal view virtual returns (address) {
-    return msg.sender;
-  }
-
-  function _msgData() internal view virtual returns (bytes calldata) {
-    return msg.data;
-  }
-
-  function _contextSuffixLength() internal view virtual returns (uint256) {
-    return 0;
-  }
-}
-
-// File @openzeppelin/contracts/utils/introspection/IERC165.sol@v5.4.0
-
-// Original license: SPDX_License_Identifier: MIT
-// OpenZeppelin Contracts (last updated v5.4.0) (utils/introspection/IERC165.sol)
-
-/**
- * @dev Interface of the ERC-165 standard, as defined in the
- * https://eips.ethereum.org/EIPS/eip-165[ERC].
- *
- * Implementers can declare support of contract interfaces, which can then be
- * queried by others ({ERC165Checker}).
- *
- * For an implementation, see {ERC165}.
- */
-interface IERC165 {
-  /**
-   * @dev Returns true if this contract implements the interface defined by
-   * `interfaceId`. See the corresponding
-   * https://eips.ethereum.org/EIPS/eip-165#how-interfaces-are-identified[ERC section]
-   * to learn more about how these ids are created.
-   *
-   * This function call must use less than 30 000 gas.
-   */
-  function supportsInterface(bytes4 interfaceId) external view returns (bool);
-}
-
-// File @openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol@v5.4.0
-
-// Original license: SPDX_License_Identifier: MIT
-// OpenZeppelin Contracts (last updated v5.4.0) (utils/introspection/ERC165.sol)
-
-/**
- * @dev Implementation of the {IERC165} interface.
- *
- * Contracts that want to implement ERC-165 should inherit from this contract and override {supportsInterface} to check
- * for the additional interface id that will be supported. For example:
- *
- * ```solidity
- * function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
- *     return interfaceId == type(MyInterface).interfaceId || super.supportsInterface(interfaceId);
- * }
- * ```
- */
-abstract contract ERC165Upgradeable is Initializable, IERC165 {
-  function __ERC165_init() internal onlyInitializing {}
-
-  function __ERC165_init_unchained() internal onlyInitializing {}
-  /// @inheritdoc IERC165
-  function supportsInterface(bytes4 interfaceId) public view virtual returns (bool) {
-    return interfaceId == type(IERC165).interfaceId;
-  }
-}
-
-// File @openzeppelin/contracts/access/IAccessControl.sol@v5.4.0
-
-// Original license: SPDX_License_Identifier: MIT
-// OpenZeppelin Contracts (last updated v5.4.0) (access/IAccessControl.sol)
-
-/**
- * @dev External interface of AccessControl declared to support ERC-165 detection.
- */
-interface IAccessControl {
-  /**
-   * @dev The `account` is missing a role.
-   */
-  error AccessControlUnauthorizedAccount(address account, bytes32 neededRole);
-
-  /**
-   * @dev The caller of a function is not the expected one.
-   *
-   * NOTE: Don't confuse with {AccessControlUnauthorizedAccount}.
-   */
-  error AccessControlBadConfirmation();
-
-  /**
-   * @dev Emitted when `newAdminRole` is set as ``role``'s admin role, replacing `previousAdminRole`
-   *
-   * `DEFAULT_ADMIN_ROLE` is the starting admin for all roles, despite
-   * {RoleAdminChanged} not being emitted to signal this.
-   */
-  event RoleAdminChanged(bytes32 indexed role, bytes32 indexed previousAdminRole, bytes32 indexed newAdminRole);
-
-  /**
-   * @dev Emitted when `account` is granted `role`.
-   *
-   * `sender` is the account that originated the contract call. This account bears the admin role (for the granted role).
-   * Expected in cases where the role was granted using the internal {AccessControl-_grantRole}.
-   */
-  event RoleGranted(bytes32 indexed role, address indexed account, address indexed sender);
-
-  /**
-   * @dev Emitted when `account` is revoked `role`.
-   *
-   * `sender` is the account that originated the contract call:
-   *   - if using `revokeRole`, it is the admin role bearer
-   *   - if using `renounceRole`, it is the role bearer (i.e. `account`)
-   */
-  event RoleRevoked(bytes32 indexed role, address indexed account, address indexed sender);
-
-  /**
-   * @dev Returns `true` if `account` has been granted `role`.
-   */
-  function hasRole(bytes32 role, address account) external view returns (bool);
-
-  /**
-   * @dev Returns the admin role that controls `role`. See {grantRole} and
-   * {revokeRole}.
-   *
-   * To change a role's admin, use {AccessControl-_setRoleAdmin}.
-   */
-  function getRoleAdmin(bytes32 role) external view returns (bytes32);
-
-  /**
-   * @dev Grants `role` to `account`.
-   *
-   * If `account` had not been already granted `role`, emits a {RoleGranted}
-   * event.
-   *
-   * Requirements:
-   *
-   * - the caller must have ``role``'s admin role.
-   */
-  function grantRole(bytes32 role, address account) external;
-
-  /**
-   * @dev Revokes `role` from `account`.
-   *
-   * If `account` had been granted `role`, emits a {RoleRevoked} event.
-   *
-   * Requirements:
-   *
-   * - the caller must have ``role``'s admin role.
-   */
-  function revokeRole(bytes32 role, address account) external;
-
-  /**
-   * @dev Revokes `role` from the calling account.
-   *
-   * Roles are often managed via {grantRole} and {revokeRole}: this function's
-   * purpose is to provide a mechanism for accounts to lose their privileges
-   * if they are compromised (such as when a trusted device is misplaced).
-   *
-   * If the calling account had been granted `role`, emits a {RoleRevoked}
-   * event.
-   *
-   * Requirements:
-   *
-   * - the caller must be `callerConfirmation`.
-   */
-  function renounceRole(bytes32 role, address callerConfirmation) external;
-}
-
-// File @openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol@v5.4.0
-
-// Original license: SPDX_License_Identifier: MIT
-// OpenZeppelin Contracts (last updated v5.4.0) (access/AccessControl.sol)
-
-/**
- * @dev Contract module that allows children to implement role-based access
- * control mechanisms. This is a lightweight version that doesn't allow enumerating role
- * members except through off-chain means by accessing the contract event logs. Some
- * applications may benefit from on-chain enumerability, for those cases see
- * {AccessControlEnumerable}.
- *
- * Roles are referred to by their `bytes32` identifier. These should be exposed
- * in the external API and be unique. The best way to achieve this is by
- * using `public constant` hash digests:
- *
- * ```solidity
- * bytes32 public constant MY_ROLE = keccak256("MY_ROLE");
- * ```
- *
- * Roles can be used to represent a set of permissions. To restrict access to a
- * function call, use {hasRole}:
- *
- * ```solidity
- * function foo() public {
- *     require(hasRole(MY_ROLE, msg.sender));
- *     ...
- * }
- * ```
- *
- * Roles can be granted and revoked dynamically via the {grantRole} and
- * {revokeRole} functions. Each role has an associated admin role, and only
- * accounts that have a role's admin role can call {grantRole} and {revokeRole}.
- *
- * By default, the admin role for all roles is `DEFAULT_ADMIN_ROLE`, which means
- * that only accounts with this role will be able to grant or revoke other
- * roles. More complex role relationships can be created by using
- * {_setRoleAdmin}.
- *
- * WARNING: The `DEFAULT_ADMIN_ROLE` is also its own admin: it has permission to
- * grant and revoke this role. Extra precautions should be taken to secure
- * accounts that have been granted it. We recommend using {AccessControlDefaultAdminRules}
- * to enforce additional security measures for this role.
- */
-abstract contract AccessControlUpgradeable is Initializable, ContextUpgradeable, IAccessControl, ERC165Upgradeable {
-  struct RoleData {
-    mapping(address account => bool) hasRole;
-    bytes32 adminRole;
-  }
-
-  bytes32 public constant DEFAULT_ADMIN_ROLE = 0x00;
-
-  /// @custom:storage-location erc7201:openzeppelin.storage.AccessControl
-  struct AccessControlStorage {
-    mapping(bytes32 role => RoleData) _roles;
-  }
-
-  // keccak256(abi.encode(uint256(keccak256("openzeppelin.storage.AccessControl")) - 1)) & ~bytes32(uint256(0xff))
-  bytes32 private constant AccessControlStorageLocation =
-    0x02dd7bc7dec4dceedda775e58dd541e08a116c6c53815c0bd028192f7b626800;
-
-  function _getAccessControlStorage() private pure returns (AccessControlStorage storage $) {
-    assembly {
-      $.slot := AccessControlStorageLocation
-    }
-  }
-
-  /**
-   * @dev Modifier that checks that an account has a specific role. Reverts
-   * with an {AccessControlUnauthorizedAccount} error including the required role.
-   */
-  modifier onlyRole(bytes32 role) {
-    _checkRole(role);
-    _;
-  }
-
-  function __AccessControl_init() internal onlyInitializing {}
-
-  function __AccessControl_init_unchained() internal onlyInitializing {}
-  /// @inheritdoc IERC165
-  function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
-    return interfaceId == type(IAccessControl).interfaceId || super.supportsInterface(interfaceId);
-  }
-
-  /**
-   * @dev Returns `true` if `account` has been granted `role`.
-   */
-  function hasRole(bytes32 role, address account) public view virtual returns (bool) {
-    AccessControlStorage storage $ = _getAccessControlStorage();
-    return $._roles[role].hasRole[account];
-  }
-
-  /**
-   * @dev Reverts with an {AccessControlUnauthorizedAccount} error if `_msgSender()`
-   * is missing `role`. Overriding this function changes the behavior of the {onlyRole} modifier.
-   */
-  function _checkRole(bytes32 role) internal view virtual {
-    _checkRole(role, _msgSender());
-  }
-
-  /**
-   * @dev Reverts with an {AccessControlUnauthorizedAccount} error if `account`
-   * is missing `role`.
-   */
-  function _checkRole(bytes32 role, address account) internal view virtual {
-    if (!hasRole(role, account)) {
-      revert AccessControlUnauthorizedAccount(account, role);
-    }
-  }
-
-  /**
-   * @dev Returns the admin role that controls `role`. See {grantRole} and
-   * {revokeRole}.
-   *
-   * To change a role's admin, use {_setRoleAdmin}.
-   */
-  function getRoleAdmin(bytes32 role) public view virtual returns (bytes32) {
-    AccessControlStorage storage $ = _getAccessControlStorage();
-    return $._roles[role].adminRole;
-  }
-
-  /**
-   * @dev Grants `role` to `account`.
-   *
-   * If `account` had not been already granted `role`, emits a {RoleGranted}
-   * event.
-   *
-   * Requirements:
-   *
-   * - the caller must have ``role``'s admin role.
-   *
-   * May emit a {RoleGranted} event.
-   */
-  function grantRole(bytes32 role, address account) public virtual onlyRole(getRoleAdmin(role)) {
-    _grantRole(role, account);
-  }
-
-  /**
-   * @dev Revokes `role` from `account`.
-   *
-   * If `account` had been granted `role`, emits a {RoleRevoked} event.
-   *
-   * Requirements:
-   *
-   * - the caller must have ``role``'s admin role.
-   *
-   * May emit a {RoleRevoked} event.
-   */
-  function revokeRole(bytes32 role, address account) public virtual onlyRole(getRoleAdmin(role)) {
-    _revokeRole(role, account);
-  }
-
-  /**
-   * @dev Revokes `role` from the calling account.
-   *
-   * Roles are often managed via {grantRole} and {revokeRole}: this function's
-   * purpose is to provide a mechanism for accounts to lose their privileges
-   * if they are compromised (such as when a trusted device is misplaced).
-   *
-   * If the calling account had been revoked `role`, emits a {RoleRevoked}
-   * event.
-   *
-   * Requirements:
-   *
-   * - the caller must be `callerConfirmation`.
-   *
-   * May emit a {RoleRevoked} event.
-   */
-  function renounceRole(bytes32 role, address callerConfirmation) public virtual {
-    if (callerConfirmation != _msgSender()) {
-      revert AccessControlBadConfirmation();
+    function __Context_init() internal onlyInitializing {
     }
 
-    _revokeRole(role, callerConfirmation);
-  }
-
-  /**
-   * @dev Sets `adminRole` as ``role``'s admin role.
-   *
-   * Emits a {RoleAdminChanged} event.
-   */
-  function _setRoleAdmin(bytes32 role, bytes32 adminRole) internal virtual {
-    AccessControlStorage storage $ = _getAccessControlStorage();
-    bytes32 previousAdminRole = getRoleAdmin(role);
-    $._roles[role].adminRole = adminRole;
-    emit RoleAdminChanged(role, previousAdminRole, adminRole);
-  }
-
-  /**
-   * @dev Attempts to grant `role` to `account` and returns a boolean indicating if `role` was granted.
-   *
-   * Internal function without access restriction.
-   *
-   * May emit a {RoleGranted} event.
-   */
-  function _grantRole(bytes32 role, address account) internal virtual returns (bool) {
-    AccessControlStorage storage $ = _getAccessControlStorage();
-    if (!hasRole(role, account)) {
-      $._roles[role].hasRole[account] = true;
-      emit RoleGranted(role, account, _msgSender());
-      return true;
-    } else {
-      return false;
+    function __Context_init_unchained() internal onlyInitializing {
     }
-  }
-
-  /**
-   * @dev Attempts to revoke `role` from `account` and returns a boolean indicating if `role` was revoked.
-   *
-   * Internal function without access restriction.
-   *
-   * May emit a {RoleRevoked} event.
-   */
-  function _revokeRole(bytes32 role, address account) internal virtual returns (bool) {
-    AccessControlStorage storage $ = _getAccessControlStorage();
-    if (hasRole(role, account)) {
-      $._roles[role].hasRole[account] = false;
-      emit RoleRevoked(role, account, _msgSender());
-      return true;
-    } else {
-      return false;
+    function _msgSender() internal view virtual returns (address) {
+        return msg.sender;
     }
-  }
+
+    function _msgData() internal view virtual returns (bytes calldata) {
+        return msg.data;
+    }
+
+    function _contextSuffixLength() internal view virtual returns (uint256) {
+        return 0;
+    }
 }
+
 
 // File @openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol@v5.4.0
 
 // Original license: SPDX_License_Identifier: MIT
 // OpenZeppelin Contracts (last updated v5.3.0) (utils/Pausable.sol)
+
+
+
 
 /**
  * @dev Contract module which allows children to implement an emergency stop
@@ -667,124 +1035,129 @@ abstract contract AccessControlUpgradeable is Initializable, ContextUpgradeable,
  * simply including this module, only once the modifiers are put in place.
  */
 abstract contract PausableUpgradeable is Initializable, ContextUpgradeable {
-  /// @custom:storage-location erc7201:openzeppelin.storage.Pausable
-  struct PausableStorage {
-    bool _paused;
-  }
-
-  // keccak256(abi.encode(uint256(keccak256("openzeppelin.storage.Pausable")) - 1)) & ~bytes32(uint256(0xff))
-  bytes32 private constant PausableStorageLocation = 0xcd5ed15c6e187e77e9aee88184c21f4f2182ab5827cb3b7e07fbedcd63f03300;
-
-  function _getPausableStorage() private pure returns (PausableStorage storage $) {
-    assembly {
-      $.slot := PausableStorageLocation
+    /// @custom:storage-location erc7201:openzeppelin.storage.Pausable
+    struct PausableStorage {
+        bool _paused;
     }
-  }
 
-  /**
-   * @dev Emitted when the pause is triggered by `account`.
-   */
-  event Paused(address account);
+    // keccak256(abi.encode(uint256(keccak256("openzeppelin.storage.Pausable")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant PausableStorageLocation = 0xcd5ed15c6e187e77e9aee88184c21f4f2182ab5827cb3b7e07fbedcd63f03300;
 
-  /**
-   * @dev Emitted when the pause is lifted by `account`.
-   */
-  event Unpaused(address account);
-
-  /**
-   * @dev The operation failed because the contract is paused.
-   */
-  error EnforcedPause();
-
-  /**
-   * @dev The operation failed because the contract is not paused.
-   */
-  error ExpectedPause();
-
-  /**
-   * @dev Modifier to make a function callable only when the contract is not paused.
-   *
-   * Requirements:
-   *
-   * - The contract must not be paused.
-   */
-  modifier whenNotPaused() {
-    _requireNotPaused();
-    _;
-  }
-
-  /**
-   * @dev Modifier to make a function callable only when the contract is paused.
-   *
-   * Requirements:
-   *
-   * - The contract must be paused.
-   */
-  modifier whenPaused() {
-    _requirePaused();
-    _;
-  }
-
-  function __Pausable_init() internal onlyInitializing {}
-
-  function __Pausable_init_unchained() internal onlyInitializing {}
-  /**
-   * @dev Returns true if the contract is paused, and false otherwise.
-   */
-  function paused() public view virtual returns (bool) {
-    PausableStorage storage $ = _getPausableStorage();
-    return $._paused;
-  }
-
-  /**
-   * @dev Throws if the contract is paused.
-   */
-  function _requireNotPaused() internal view virtual {
-    if (paused()) {
-      revert EnforcedPause();
+    function _getPausableStorage() private pure returns (PausableStorage storage $) {
+        assembly {
+            $.slot := PausableStorageLocation
+        }
     }
-  }
 
-  /**
-   * @dev Throws if the contract is not paused.
-   */
-  function _requirePaused() internal view virtual {
-    if (!paused()) {
-      revert ExpectedPause();
+    /**
+     * @dev Emitted when the pause is triggered by `account`.
+     */
+    event Paused(address account);
+
+    /**
+     * @dev Emitted when the pause is lifted by `account`.
+     */
+    event Unpaused(address account);
+
+    /**
+     * @dev The operation failed because the contract is paused.
+     */
+    error EnforcedPause();
+
+    /**
+     * @dev The operation failed because the contract is not paused.
+     */
+    error ExpectedPause();
+
+    /**
+     * @dev Modifier to make a function callable only when the contract is not paused.
+     *
+     * Requirements:
+     *
+     * - The contract must not be paused.
+     */
+    modifier whenNotPaused() {
+        _requireNotPaused();
+        _;
     }
-  }
 
-  /**
-   * @dev Triggers stopped state.
-   *
-   * Requirements:
-   *
-   * - The contract must not be paused.
-   */
-  function _pause() internal virtual whenNotPaused {
-    PausableStorage storage $ = _getPausableStorage();
-    $._paused = true;
-    emit Paused(_msgSender());
-  }
+    /**
+     * @dev Modifier to make a function callable only when the contract is paused.
+     *
+     * Requirements:
+     *
+     * - The contract must be paused.
+     */
+    modifier whenPaused() {
+        _requirePaused();
+        _;
+    }
 
-  /**
-   * @dev Returns to normal state.
-   *
-   * Requirements:
-   *
-   * - The contract must be paused.
-   */
-  function _unpause() internal virtual whenPaused {
-    PausableStorage storage $ = _getPausableStorage();
-    $._paused = false;
-    emit Unpaused(_msgSender());
-  }
+    function __Pausable_init() internal onlyInitializing {
+    }
+
+    function __Pausable_init_unchained() internal onlyInitializing {
+    }
+    /**
+     * @dev Returns true if the contract is paused, and false otherwise.
+     */
+    function paused() public view virtual returns (bool) {
+        PausableStorage storage $ = _getPausableStorage();
+        return $._paused;
+    }
+
+    /**
+     * @dev Throws if the contract is paused.
+     */
+    function _requireNotPaused() internal view virtual {
+        if (paused()) {
+            revert EnforcedPause();
+        }
+    }
+
+    /**
+     * @dev Throws if the contract is not paused.
+     */
+    function _requirePaused() internal view virtual {
+        if (!paused()) {
+            revert ExpectedPause();
+        }
+    }
+
+    /**
+     * @dev Triggers stopped state.
+     *
+     * Requirements:
+     *
+     * - The contract must not be paused.
+     */
+    function _pause() internal virtual whenNotPaused {
+        PausableStorage storage $ = _getPausableStorage();
+        $._paused = true;
+        emit Paused(_msgSender());
+    }
+
+    /**
+     * @dev Returns to normal state.
+     *
+     * Requirements:
+     *
+     * - The contract must be paused.
+     */
+    function _unpause() internal virtual whenPaused {
+        PausableStorage storage $ = _getPausableStorage();
+        $._paused = false;
+        emit Unpaused(_msgSender());
+    }
 }
+
 
 // File @openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol@v5.4.0
 
 // Original license: SPDX_License_Identifier: MIT
 // OpenZeppelin Contracts (last updated v5.1.0) (utils/ReentrancyGuard.sol)
+
+
 
 /**
  * @dev Contract module that helps prevent reentrant calls to a function.
@@ -806,197 +1179,89 @@ abstract contract PausableUpgradeable is Initializable, ContextUpgradeable {
  * https://blog.openzeppelin.com/reentrancy-after-istanbul/[Reentrancy After Istanbul].
  */
 abstract contract ReentrancyGuardUpgradeable is Initializable {
-  // Booleans are more expensive than uint256 or any type that takes up a full
-  // word because each write operation emits an extra SLOAD to first read the
-  // slot's contents, replace the bits taken up by the boolean, and then write
-  // back. This is the compiler's defense against contract upgrades and
-  // pointer aliasing, and it cannot be disabled.
+    // Booleans are more expensive than uint256 or any type that takes up a full
+    // word because each write operation emits an extra SLOAD to first read the
+    // slot's contents, replace the bits taken up by the boolean, and then write
+    // back. This is the compiler's defense against contract upgrades and
+    // pointer aliasing, and it cannot be disabled.
 
-  // The values being non-zero value makes deployment a bit more expensive,
-  // but in exchange the refund on every call to nonReentrant will be lower in
-  // amount. Since refunds are capped to a percentage of the total
-  // transaction's gas, it is best to keep them low in cases like this one, to
-  // increase the likelihood of the full refund coming into effect.
-  uint256 private constant NOT_ENTERED = 1;
-  uint256 private constant ENTERED = 2;
+    // The values being non-zero value makes deployment a bit more expensive,
+    // but in exchange the refund on every call to nonReentrant will be lower in
+    // amount. Since refunds are capped to a percentage of the total
+    // transaction's gas, it is best to keep them low in cases like this one, to
+    // increase the likelihood of the full refund coming into effect.
+    uint256 private constant NOT_ENTERED = 1;
+    uint256 private constant ENTERED = 2;
 
-  /// @custom:storage-location erc7201:openzeppelin.storage.ReentrancyGuard
-  struct ReentrancyGuardStorage {
-    uint256 _status;
-  }
-
-  // keccak256(abi.encode(uint256(keccak256("openzeppelin.storage.ReentrancyGuard")) - 1)) & ~bytes32(uint256(0xff))
-  bytes32 private constant ReentrancyGuardStorageLocation =
-    0x9b779b17422d0df92223018b32b4d1fa46e071723d6817e2486d003becc55f00;
-
-  function _getReentrancyGuardStorage() private pure returns (ReentrancyGuardStorage storage $) {
-    assembly {
-      $.slot := ReentrancyGuardStorageLocation
-    }
-  }
-
-  /**
-   * @dev Unauthorized reentrant call.
-   */
-  error ReentrancyGuardReentrantCall();
-
-  function __ReentrancyGuard_init() internal onlyInitializing {
-    __ReentrancyGuard_init_unchained();
-  }
-
-  function __ReentrancyGuard_init_unchained() internal onlyInitializing {
-    ReentrancyGuardStorage storage $ = _getReentrancyGuardStorage();
-    $._status = NOT_ENTERED;
-  }
-
-  /**
-   * @dev Prevents a contract from calling itself, directly or indirectly.
-   * Calling a `nonReentrant` function from another `nonReentrant`
-   * function is not supported. It is possible to prevent this from happening
-   * by making the `nonReentrant` function external, and making it call a
-   * `private` function that does the actual work.
-   */
-  modifier nonReentrant() {
-    _nonReentrantBefore();
-    _;
-    _nonReentrantAfter();
-  }
-
-  function _nonReentrantBefore() private {
-    ReentrancyGuardStorage storage $ = _getReentrancyGuardStorage();
-    // On the first call to nonReentrant, _status will be NOT_ENTERED
-    if ($._status == ENTERED) {
-      revert ReentrancyGuardReentrantCall();
+    /// @custom:storage-location erc7201:openzeppelin.storage.ReentrancyGuard
+    struct ReentrancyGuardStorage {
+        uint256 _status;
     }
 
-    // Any calls to nonReentrant after this point will fail
-    $._status = ENTERED;
-  }
+    // keccak256(abi.encode(uint256(keccak256("openzeppelin.storage.ReentrancyGuard")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant ReentrancyGuardStorageLocation = 0x9b779b17422d0df92223018b32b4d1fa46e071723d6817e2486d003becc55f00;
 
-  function _nonReentrantAfter() private {
-    ReentrancyGuardStorage storage $ = _getReentrancyGuardStorage();
-    // By storing the original value once again, a refund is triggered (see
-    // https://eips.ethereum.org/EIPS/eip-2200)
-    $._status = NOT_ENTERED;
-  }
+    function _getReentrancyGuardStorage() private pure returns (ReentrancyGuardStorage storage $) {
+        assembly {
+            $.slot := ReentrancyGuardStorageLocation
+        }
+    }
 
-  /**
-   * @dev Returns true if the reentrancy guard is currently set to "entered", which indicates there is a
-   * `nonReentrant` function in the call stack.
-   */
-  function _reentrancyGuardEntered() internal view returns (bool) {
-    ReentrancyGuardStorage storage $ = _getReentrancyGuardStorage();
-    return $._status == ENTERED;
-  }
+    /**
+     * @dev Unauthorized reentrant call.
+     */
+    error ReentrancyGuardReentrantCall();
+
+    function __ReentrancyGuard_init() internal onlyInitializing {
+        __ReentrancyGuard_init_unchained();
+    }
+
+    function __ReentrancyGuard_init_unchained() internal onlyInitializing {
+        ReentrancyGuardStorage storage $ = _getReentrancyGuardStorage();
+        $._status = NOT_ENTERED;
+    }
+
+    /**
+     * @dev Prevents a contract from calling itself, directly or indirectly.
+     * Calling a `nonReentrant` function from another `nonReentrant`
+     * function is not supported. It is possible to prevent this from happening
+     * by making the `nonReentrant` function external, and making it call a
+     * `private` function that does the actual work.
+     */
+    modifier nonReentrant() {
+        _nonReentrantBefore();
+        _;
+        _nonReentrantAfter();
+    }
+
+    function _nonReentrantBefore() private {
+        ReentrancyGuardStorage storage $ = _getReentrancyGuardStorage();
+        // On the first call to nonReentrant, _status will be NOT_ENTERED
+        if ($._status == ENTERED) {
+            revert ReentrancyGuardReentrantCall();
+        }
+
+        // Any calls to nonReentrant after this point will fail
+        $._status = ENTERED;
+    }
+
+    function _nonReentrantAfter() private {
+        ReentrancyGuardStorage storage $ = _getReentrancyGuardStorage();
+        // By storing the original value once again, a refund is triggered (see
+        // https://eips.ethereum.org/EIPS/eip-2200)
+        $._status = NOT_ENTERED;
+    }
+
+    /**
+     * @dev Returns true if the reentrancy guard is currently set to "entered", which indicates there is a
+     * `nonReentrant` function in the call stack.
+     */
+    function _reentrancyGuardEntered() internal view returns (bool) {
+        ReentrancyGuardStorage storage $ = _getReentrancyGuardStorage();
+        return $._status == ENTERED;
+    }
 }
 
-// File contracts/utils/Constants.sol
-
-// Original license: SPDX_License_Identifier: MIT
-
-// Shared constants across the Asset Controller system
-library Constants {
-  // Role constants
-  bytes32 public constant ADMIN_ROLE = keccak256('ADMIN_ROLE');
-  bytes32 public constant CONTROLLER_ROLE = keccak256('CONTROLLER_ROLE');
-  bytes32 public constant MINTER_ROLE = keccak256('MINTER_ROLE');
-  bytes32 public constant BURNER_ROLE = keccak256('BURNER_ROLE');
-  bytes32 public constant TRANSFER_ROLE = keccak256('TRANSFER_ROLE');
-  bytes32 public constant PAUSER_ROLE = keccak256('PAUSER_ROLE');
-  bytes32 public constant CUSTODY_MANAGER_ROLE = keccak256('CUSTODY_MANAGER_ROLE');
-  bytes32 public constant CONFIG_MANAGER_ROLE = keccak256('CONFIG_MANAGER_ROLE');
-  bytes32 public constant PERMITTED_CONTRACT_ROLE = keccak256('PERMITTED_CONTRACT_ROLE');
-  bytes32 public constant FEE_MANAGER_ROLE = keccak256('FEE_MANAGER_ROLE');
-  bytes32 public constant LOCK_MANAGER_ROLE = keccak256('LOCK_MANAGER_ROLE');
-
-  // Asset types enum
-  enum AssetType {
-    REC, // Renewable Energy Certificate
-    CarbonCredit // Carbon Credit
-  }
-
-  // Currency types enum
-  enum CurrencyType {
-    USDC, // USD Coin
-    USDT // Tether USD
-  }
-}
-
-// File contracts/interfaces/IConfigs.sol
-
-// Original license: SPDX_License_Identifier: MIT
-
-/// @title IConfigs
-interface IConfigs {
-  // ============================
-  // Events
-  // ============================
-
-  event CurrencyWhitelisted(Constants.CurrencyType currency, address indexed currencyAddress);
-  event CurrencyRemovedFromWhitelist(Constants.CurrencyType currency);
-  event AssetWhitelisted(Constants.AssetType asset, address indexed assetAddress);
-  event AssetRemovedFromWhitelist(Constants.AssetType asset);
-
-  event AccessControllerUpdated(address newAccessController);
-  event CustodianUpdated(address newCustodian);
-  event AssetControllerUpdated(address newAssetController);
-  event FeeReceiverContractAddressUpdated(address newFeeReceiver);
-  event FeeReceiverUpdated(address oldFeeAddress, address newFeeReceiver);
-
-  // ============================
-  // Functions
-  // ============================
-
-  /// @dev Returns true if the currency is permitted
-  function isPermittedCurrency(Constants.CurrencyType currency) external view returns (bool);
-  /// @dev Returns true if the asset is permitted
-  function isPermittedAsset(Constants.AssetType asset) external view returns (bool);
-
-  /// @dev Returns the address of the permitted asset for given asset type. Ex RECs, CarbonCredits, etc.
-  function assetAddress(Constants.AssetType asset) external view returns (address);
-  /// @dev Returns the address of the permitted currency for given currency type. Ex USDC, USDT, etc.
-  function currencyAddress(Constants.CurrencyType currency) external view returns (address);
-
-  /// @dev Returns the list of all permitted currency addresses
-  function permittedCurrencies() external view returns (address[] memory);
-  /// @dev Returns the list of all permitted asset addresses
-  function permittedAssets() external view returns (address[] memory);
-
-  /// @dev Returns the fee receiver contract address
-  function feeVaultAddress() external view returns (address);
-  /// @dev Updates the fee receiver contract address
-  function updateFeeVault(address newFeeAddress) external;
-
-  /// @dev Returns the fee receiver address
-  function feeReceiverAddress() external view returns (address);
-  /// @dev Updates the fee receiver address
-  function updateFeeReceiverAddress(address newFeeAddress) external;
-
-  /// @dev Returns the access controller contract address
-  function accessControllerAddress() external view returns (address);
-  /// @dev Updates the access controller contract address
-  function updateAccessController(address newAccessController) external;
-
-  /// @dev Returns the custodian contract address
-  function custodianAddress() external view returns (address);
-  /// @dev Updates the custodian contract address
-  function updateCustodian(address newCustodian) external;
-
-  /// @dev Returns the asset controller contract address
-  function assetControllerAddress() external view returns (address);
-  /// @dev Updates the asset controller contract address
-  function updateAssetController(address newAssetController) external;
-
-  /// @dev adds currency to the permitted currency list and maps it with enum
-  function addPermittedCurrencies(Constants.CurrencyType currency, address currencyAddress) external;
-  /// @dev removes currency from the permitted currency list
-  function removePermittedCurrencies(Constants.CurrencyType currency) external;
-
-  /// @dev add ERC1155 assets to the permitted assets list and maps it with enum
-  function addPermittedAssets(Constants.AssetType asset, address assetAddress) external;
-  /// @dev removes asset from the permitted assets list
-  function removePermittedAssets(Constants.AssetType asset) external;
-}
 
 // File contracts/interfaces/IAccessController.sol
 
@@ -1021,6 +1286,19 @@ interface IAccessController {
   error RoleNotAssigned(bytes32 role, address account);
 
   // ============ Events ============
+
+  /// @notice Emitted when a super admin role is granted
+  /// @param role The role identifier
+  /// @param account The account that received the role
+  /// @param grantedBy The SuperAdmin who granted the role
+  event SuperAdminRoleGranted(bytes32 indexed role, address indexed account, address indexed grantedBy);
+
+  /// @notice Emitted when a super admin role is revoked
+  /// @param role The role identifier
+  /// @param account The account that lost the role
+  /// @param revokedBy The SuperAdmin who revoked the role
+  event SuperAdminRoleRevoked(bytes32 indexed role, address indexed account, address indexed revokedBy);
+
   /// @notice Emitted when a transactional role is granted
   /// @param role The role identifier
   /// @param account The account that received the role
@@ -1048,13 +1326,39 @@ interface IAccessController {
   /// @notice Emitted when ownership is recovered by a SuperAdmin
   /// @param oldOwner The previous owner
   /// @param newOwner The new owner (multisig/governance)
-  /// @param triggeredBy The SuperAdmin who triggered the recovery
-  event OwnershipRecovered(address indexed oldOwner, address indexed newOwner, address indexed triggeredBy);
+  event OwnershipRecovered(address indexed oldOwner, address indexed newOwner);
 
   // ============ Initializer ============
   /// @notice Initializes the upgradeable contract
-  /// @param ownerAddress The initial owner (multisig/governance)
-  function initialize(address ownerAddress) external;
+  /// @param accessControlManager The initial owner (multisig/governance)
+  /// @param superAdminAddress The initial super admin
+  /// @param configManager The initial config manager for Configs contract
+  /// @param proxyAdmin The initial proxy admin for upgrades
+  /// @dev This replaces the constructor for upgradeable contracts
+  function initialize(
+    address accessControlManager,
+    address superAdminAddress,
+    address configManager,
+    address proxyAdmin
+  ) external;
+
+  // =========== Super Admin Role Management ============
+  /// @notice Grants a super admin role to an account
+  /// @dev Only callable by the Super Admin
+  /// @param role The role identifier
+  /// @param account The account to grant the role to
+  function grantSuperAdminRole(bytes32 role, address account) external;
+  /// @notice Checks if an account has a given super admin role
+  /// @param role The role identifier
+  /// @param account The account to check
+  /// @return True if the account has the role, false otherwise
+  function hasSuperAdminRole(bytes32 role, address account) external view returns (bool);
+
+  /// @notice Revokes a super admin role from an account
+  /// @dev Only callable by the Super Admin
+  /// @param role The role identifier
+  /// @param account The account to revoke the role from
+  function revokeSuperAdminRole(bytes32 role, address account) external;
 
   // ============ Admin Role Management ============
   /// @notice Grants an admin role to an account
@@ -1096,9 +1400,219 @@ interface IAccessController {
   function recoverOwnership(address newOwner) external;
 }
 
-// File contracts/interfaces/ITokenLockerERC20.sol
+
+// File contracts/utils/Constants.sol
 
 // Original license: SPDX_License_Identifier: MIT
+
+
+// Shared constants across the Asset Controller system
+library Constants {
+  // Role constants
+  bytes32 public constant ADMIN_ROLE = keccak256('ADMIN_ROLE');
+  bytes32 public constant CONTROLLER_ROLE = keccak256('CONTROLLER_ROLE');
+  bytes32 public constant MINTER_ROLE = keccak256('MINTER_ROLE');
+  bytes32 public constant BURNER_ROLE = keccak256('BURNER_ROLE');
+  bytes32 public constant TRANSFER_ROLE = keccak256('TRANSFER_ROLE');
+  bytes32 public constant PAUSER_ROLE = keccak256('PAUSER_ROLE');
+  bytes32 public constant CUSTODY_MANAGER_ROLE = keccak256('CUSTODY_MANAGER_ROLE');
+  bytes32 public constant CONFIG_MANAGER_ROLE = keccak256('CONFIG_MANAGER_ROLE');
+  bytes32 public constant PERMITTED_CONTRACT_ROLE = keccak256('PERMITTED_CONTRACT_ROLE');
+  bytes32 public constant FEE_MANAGER_ROLE = keccak256('FEE_MANAGER_ROLE');
+  bytes32 public constant LOCK_MANAGER_ROLE = keccak256('LOCK_MANAGER_ROLE');
+  bytes32 public constant AUTHORIZED_LOCKER_ROLE = keccak256('AUTHORIZED_LOCKER_ROLE');
+  bytes32 public constant SUPER_ADMIN_ROLE = keccak256('SUPER_ADMIN_ROLE');
+  bytes32 public constant TRANSACTION_ACCESS_MANAGER_ROLE = keccak256('TRANSACTION_ACCESS_MANAGER_ROLE');
+  bytes32 public constant PROXY_ADMIN_ROLE = keccak256('PROXY_ADMIN_ROLE');
+  bytes32 public constant ACCESS_CONTROLLER_MANAGER_ROLE = keccak256('ACCESS_CONTROLLER_MANAGER_ROLE');
+
+  // Asset types enum
+  enum AssetType {
+    REC, // Renewable Energy Certificate
+    CarbonCredit // Carbon Credit
+  }
+
+  // Currency types enum
+  enum CurrencyType {
+    USDC, // USD Coin
+    USDT // Tether USD
+  }
+}
+
+
+// File contracts/interfaces/IConfigs.sol
+
+
+/// @title IConfigs
+interface IConfigs {
+  // ============================
+  // Events
+  // ============================
+
+  event CurrencyWhitelisted(Constants.CurrencyType currency, address indexed currencyAddress);
+  event CurrencyRemovedFromWhitelist(Constants.CurrencyType currency);
+  event AssetWhitelisted(Constants.AssetType asset, address indexed assetAddress);
+  event AssetRemovedFromWhitelist(Constants.AssetType asset);
+
+  event AccessControllerUpdated(address newAccessController);
+  event CustodianUpdated(address newCustodian);
+  event AssetControllerUpdated(address newAssetController);
+  event FeeReceiverContractAddressUpdated(address newFeeReceiver);
+  event FeeReceiverUpdated(address oldFeeAddress, address newFeeReceiver);
+  event ERC20TokenLockerUpdated(address oldTokenLocker, address newTokenLocker);
+
+  // ============================
+  // Functions
+  // ============================
+
+  /// @dev Returns true if the currency is permitted
+  function isPermittedCurrency(Constants.CurrencyType currency) external view returns (bool);
+  /// @dev Returns true if the asset is permitted
+  function isPermittedAsset(Constants.AssetType asset) external view returns (bool);
+
+  /// @dev Returns the address of the permitted asset for given asset type. Ex RECs, CarbonCredits, etc.
+  function assetAddress(Constants.AssetType asset) external view returns (address);
+  /// @dev Returns the address of the permitted currency for given currency type. Ex USDC, USDT, etc.
+  function currencyAddress(Constants.CurrencyType currency) external view returns (address);
+
+  /// @dev Returns the list of all permitted currency addresses
+  function permittedCurrencies() external view returns (address[] memory);
+  /// @dev Returns the list of all permitted asset addresses
+  function permittedAssets() external view returns (address[] memory);
+
+  /// @dev Returns the fee receiver contract address
+  function feeVaultAddress() external view returns (address);
+  /// @dev Updates the fee receiver contract address
+  function updateFeeVault(address newFeeAddress) external;
+
+  /// @dev Returns the fee receiver address
+  function feeReceiverAddress() external view returns (address);
+  /// @dev Updates the fee receiver address
+  function updateFeeReceiverAddress(address newFeeAddress) external;
+
+  /// @dev Returns the access controller contract address
+  function accessControllerAddress() external view returns (address);
+  /// @dev Updates the access controller contract address
+  function updateAccessController(address newAccessController) external;
+
+  /// @dev Returns the custodian contract address
+  function custodianAddress() external view returns (address);
+  /// @dev Updates the custodian contract address
+  function updateCustodian(address newCustodian) external;
+
+  /// @dev Returns the erc20 Token locker contract address
+  function erc20TokenLockerAddress(Constants.CurrencyType currencyType) external view returns (address);
+  /// @dev Updates the erc20 Token locker contract address
+  function updateERC20TokenLocker(Constants.CurrencyType currencyType, address newLocker) external;
+
+  /// @dev Returns the asset controller contract address
+  function assetControllerAddress() external view returns (address);
+  /// @dev Updates the asset controller contract address
+  function updateAssetController(address newAssetController) external;
+
+  /// @dev adds currency to the permitted currency list and maps it with enum
+  function addPermittedCurrencies(Constants.CurrencyType currency, address currencyAddress) external;
+  /// @dev removes currency from the permitted currency list
+  function removePermittedCurrencies(Constants.CurrencyType currency) external;
+
+  /// @dev add ERC1155 assets to the permitted assets list and maps it with enum
+  function addPermittedAssets(Constants.AssetType asset, address assetAddress) external;
+  /// @dev removes asset from the permitted assets list
+  function removePermittedAssets(Constants.AssetType asset) external;
+}
+
+
+// File contracts/utils/Errors.sol
+
+// Original license: SPDX_License_Identifier: MIT
+
+
+// Shared errors across the Asset Controller system
+error NotAuthorized();
+error ZeroAddress();
+error NotRegistered();
+error AlreadyRegistered();
+error AmountMismatch();
+error InsufficientUnlocked();
+error InsufficientBalance();
+error AlreadyExists();
+error NotExists();
+error InvalidContract(address contractAddress);
+error TransferFailed(address token, address from, address to, uint256 amount);
+error NotPermitted(address caller);
+error RoleAlreadyAssigned(bytes32 role, address account);
+error RoleNotAssigned(bytes32 role, address account);
+error SignatureExpired(uint256 deadline, uint256 currentTime);
+error InvalidNonce(address signer, uint256 expected, uint256 provided);
+error InvalidSignature(address recovered, address expected);
+error NotSuperAdmin(address account);
+error InsufficientLockedAmount();
+error LockerAlreadyAuthorized();
+error LockerNotAuthorized();
+
+
+// File contracts/config/ConfigManager.sol
+
+
+
+
+
+/**
+ * @title ConfigManagerUpgradeable
+ * @notice Abstract contract providing configuration management functionality for upgradeable contracts.
+ * @dev This contract provides a standardized way to manage configuration contracts and access control
+ *      through the IConfigs and IAccessController interfaces. It includes role-based access control
+ *      for configuration management operations.
+ * @custom:security-contact https://github.com/ava-labs/icm-contracts/blob/main/SECURITY.md
+ */
+abstract contract ConfigManagerUpgradeable is ContextUpgradeable {
+  // ==================== State Variables ====================
+
+  /// @dev The configuration contract that holds system-wide configuration
+  IConfigs public configContract;
+
+  // ==================== Initialization ====================
+
+  /**
+   * @notice Initializes the configuration manager
+   * @dev This function should be called during contract initialization
+   * @param _configAddress The address of the configuration contract
+   */
+  function _initConfigManager(address _configAddress) internal {
+    if (_configAddress == address(0)) revert ZeroAddress();
+    configContract = IConfigs(_configAddress);
+  }
+
+  // ==================== Modifiers ====================
+
+  /**
+   * @notice Modifier to restrict access to configuration managers only
+   * @dev Checks if the caller has the CONFIG_MANAGER_ROLE through the access controller
+   */
+  modifier onlyConfigManager() {
+    address accessController = configContract.accessControllerAddress();
+    if (accessController == address(0)) revert NotExists();
+
+    if (!IAccessController(accessController).hasSuperAdminRole(Constants.CONFIG_MANAGER_ROLE, _msgSender())) {
+      revert NotPermitted(_msgSender());
+    }
+    _;
+  }
+
+  modifier onlyProxyAdmin() {
+    address accessController = configContract.accessControllerAddress();
+    if (accessController == address(0)) revert NotExists();
+
+    if (!IAccessController(accessController).hasSuperAdminRole(Constants.PROXY_ADMIN_ROLE, _msgSender())) {
+      revert NotPermitted(_msgSender());
+    }
+    _;
+  }
+}
+
+
+// File contracts/interfaces/ITokenLockerERC20.sol
+
 
 /// @title ITokenLockerERC20
 /// @notice Interface for managing partial locking of ERC-20 token balances with multiple authorized lockers and admin override capability.
@@ -1117,11 +1631,6 @@ interface ITokenLockerERC20 {
   /// @dev Emitted when tokens are admin unlocked by the lock manager or owner.
   event TokensAdminUnlocked(address indexed admin, address indexed user);
 
-  /// @dev Emitted when a locker contract is authorized.
-  event LockerAuthorized(address indexed locker);
-
-  /// @dev Emitted when a locker contract's authorization is revoked.
-  event LockerRevoked(address indexed locker);
 
   // ==================== Locking ====================
 
@@ -1156,40 +1665,20 @@ interface ITokenLockerERC20 {
 
   /// @notice Returns the total locked amount for a user across all lockers.
   function getTotalLockedAmount(address user) external view returns (uint256);
-
-  // ==================== Locker Management ====================
-
-  /// @notice Authorizes a new locker contract that can lock tokens.
-  /// @dev Callable only by the contract owner.
-  function authorizeLocker(address locker) external;
-
-  /// @notice Revokes authorization of a locker contract.
-  /// @dev Callable only by the contract owner.
-  function revokeLocker(address locker) external;
 }
 
-// File contracts/utils/Errors.sol
-
-// Original license: SPDX_License_Identifier: MIT
-
-// Shared errors across the Asset Controller system
-error NotAuthorized();
-error ZeroAddress();
-error NotRegistered();
-error AlreadyRegistered();
-error AmountMismatch();
-error InsufficientUnlocked();
-error InsufficientBalance();
-error AlreadyExists();
-error NotExists();
-error InvalidContract(address contractAddress);
-error TransferFailed(address token, address from, address to, uint256 amount);
-error NotPermitted(address caller);
-error InsufficientLockedAmount();
-error LockerAlreadyAuthorized();
-error LockerNotAuthorized();
 
 // File contracts/tokenLocker/TokenLockerUpgradeable.sol
+
+
+
+
+
+
+
+
+
+
 
 /// @title TokenLockerUpgradeable
 /// @notice An upgradeable contract for managing partial locking of ERC-20 token balances.
@@ -1197,16 +1686,11 @@ error LockerNotAuthorized();
 contract TokenLockerUpgradeable is
   ITokenLockerERC20,
   Initializable,
-  AccessControlUpgradeable,
   PausableUpgradeable,
-  ReentrancyGuardUpgradeable
+  ReentrancyGuardUpgradeable,
+  UUPSUpgradeable,
+  ConfigManagerUpgradeable
 {
-  // ============================
-  // State Variables
-  // ============================
-
-  IConfigs public configContract;
-
   // ============================
   // Mappings
   // ============================
@@ -1215,8 +1699,6 @@ contract TokenLockerUpgradeable is
   mapping(address => mapping(address => uint256)) public lockedAmounts;
   /// @dev Mapping from user address to total locked amount across all lockers
   mapping(address => uint256) public totalLockedAmounts;
-  /// @dev Set of authorized locker contracts
-  mapping(address => bool) public authorizedLockers;
 
   // ============================
   // Constructor
@@ -1233,18 +1715,13 @@ contract TokenLockerUpgradeable is
 
   /**
    * @dev Initializes the contract with the specified roles and config contract
-   * @param _defaultAdmin The address of the default admin
    * @param _configContract The address of the config contract
    */
-  function initialize(address _defaultAdmin, address _configContract) public initializer {
-    __AccessControl_init();
+  function initialize(address _configContract) public virtual initializer {
     __Pausable_init();
     __ReentrancyGuard_init();
-
-    _grantRole(DEFAULT_ADMIN_ROLE, _defaultAdmin);
-
-    if (_configContract == address(0)) revert ZeroAddress();
-    configContract = IConfigs(_configContract);
+    __UUPSUpgradeable_init();
+    _initConfigManager(_configContract);
   }
 
   // ============================
@@ -1259,7 +1736,12 @@ contract TokenLockerUpgradeable is
 
   /// @dev Modifier to ensure only authorized locker contracts can call
   modifier onlyAuthorizedLocker() {
-    if (!authorizedLockers[_msgSender()]) revert NotPermitted(_msgSender());
+    address accessController = configContract.accessControllerAddress();
+    if (accessController == address(0)) revert NotRegistered();
+
+    if (!IAccessController(accessController).hasAdminRole(Constants.AUTHORIZED_LOCKER_ROLE, _msgSender())) {
+      revert NotPermitted(_msgSender());
+    }
     _;
   }
 
@@ -1395,43 +1877,8 @@ contract TokenLockerUpgradeable is
   }
 
   // ============================
-  // Locker Management
-  // ============================
-
-  /**
-   * @dev See {ITokenLockerERC20-authorizeLocker}
-   */
-  function authorizeLocker(address locker) external override onlyLockManager {
-    if (locker == address(0)) revert ZeroAddress();
-    if (authorizedLockers[locker]) revert LockerAlreadyAuthorized();
-
-    authorizedLockers[locker] = true;
-    emit LockerAuthorized(locker);
-  }
-
-  /**
-   * @dev See {ITokenLockerERC20-revokeLocker}
-   */
-  function revokeLocker(address locker) external override onlyLockManager {
-    if (locker == address(0)) revert ZeroAddress();
-    if (!authorizedLockers[locker]) revert LockerNotAuthorized();
-
-    authorizedLockers[locker] = false;
-    emit LockerRevoked(locker);
-  }
-
-  // ============================
   // Additional View Functions
   // ============================
-
-  /**
-   * @notice Checks if a locker is authorized
-   * @param locker The locker address to check
-   * @return True if the locker is authorized
-   */
-  function isAuthorizedLocker(address locker) external view returns (bool) {
-    return authorizedLockers[locker];
-  }
 
   /**
    * @notice Gets the available (unlocked) balance for a user
@@ -1453,7 +1900,7 @@ contract TokenLockerUpgradeable is
    * @dev Only callable by the default admin role
    * @param _configContract The address of the new config contract
    */
-  function setConfigContract(address _configContract) external onlyLockManager {
+  function setConfigContract(address _configContract) external onlyConfigManager {
     if (_configContract == address(0)) revert ZeroAddress();
     configContract = IConfigs(_configContract);
     emit ConfigContractUpdated(_configContract);
@@ -1471,6 +1918,10 @@ contract TokenLockerUpgradeable is
    */
   function unpause() external onlyLockManager {
     _unpause();
+  }
+
+  function _authorizeUpgrade(address newImplementation) internal virtual override onlyProxyAdmin {
+    // Only the proxy admin can upgrade
   }
 
   uint256[50] private __gap;
