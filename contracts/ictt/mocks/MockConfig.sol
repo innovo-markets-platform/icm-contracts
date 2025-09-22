@@ -22,7 +22,7 @@ contract MockConfig is IConfigs {
     }
 
     /// @dev Returns the erc20 Token locker contract address (always zero for mock)
-    function erc20TokenLockerAddress() external pure override returns (address) {
+    function erc20TokenLockerAddress(IConfigs.CurrencyType currency) external pure override returns (address) {
         return address(0);
     }
 }

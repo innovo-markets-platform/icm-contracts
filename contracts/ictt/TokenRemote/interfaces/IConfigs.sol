@@ -13,5 +13,5 @@ interface IConfigs {
   function accessControllerAddress() external view returns (address);
 
   /// @dev Returns the erc20 Token locker contract address
-  function erc20TokenLockerAddress(Constants.CurrencyType) external view returns (address);
+  function erc20TokenLockerAddress(CurrencyType currencyType) external view returns (address);
 }
