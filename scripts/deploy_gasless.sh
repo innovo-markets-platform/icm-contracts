@@ -98,6 +98,7 @@ if [[ "$DEPLOYMENT_ENV" == "testnet" ]]; then
     BLOCKCHAIN_ID_REMOTE="$BLOCKCHAIN_ID_REMOTE_TESTNET"
     ERC20_TOKEN_ADDRESS="$ERC20_TOKEN_ADDRESS_TESTNET"
     AVACLOUD_FORWARDER="$AVACLOUD_FORWARDER_TESTNET"
+    CONFIG_CONTRACT_ADDRESS="$CONFIG_CONTRACT_ADDRESS_TESTNET"
     ENV_NAME="TESTNET"
 elif [[ "$DEPLOYMENT_ENV" == "prod" ]]; then
     RPC_URL_HOME="$RPC_URL_HOME_PROD"
@@ -110,6 +111,7 @@ elif [[ "$DEPLOYMENT_ENV" == "prod" ]]; then
     BLOCKCHAIN_ID_REMOTE="$BLOCKCHAIN_ID_REMOTE_PROD"
     ERC20_TOKEN_ADDRESS="$ERC20_TOKEN_ADDRESS_PROD"
     AVACLOUD_FORWARDER="$AVACLOUD_FORWARDER_PROD"
+    CONFIG_CONTRACT_ADDRESS="$CONFIG_CONTRACT_ADDRESS_PROD"
     ENV_NAME="PRODUCTION"
 else
     echo -e "${RED}Error: Invalid DEPLOYMENT_ENV '$DEPLOYMENT_ENV'. Must be 'testnet' or 'prod'${NC}"
@@ -130,6 +132,7 @@ validate_config() {
     [[ -z "$BLOCKCHAIN_ID_REMOTE" ]] && missing_vars+=("BLOCKCHAIN_ID_REMOTE")
     [[ -z "$ERC20_TOKEN_ADDRESS" ]] && missing_vars+=("ERC20_TOKEN_ADDRESS")
     [[ -z "$AVACLOUD_FORWARDER" ]] && missing_vars+=("AVACLOUD_FORWARDER")
+    [[ -z "$CONFIG_CONTRACT_ADDRESS" ]] && missing_vars+=("CONFIG_CONTRACT_ADDRESS")
     
     if [[ ${#missing_vars[@]} -gt 0 ]]; then
         echo -e "${RED}Error: Missing required configuration variables:${NC}"
@@ -161,6 +164,7 @@ info "  - Registry Remote: $REG_REMOTE"
 info "  - Manager: $MNG"
 info "  - ERC20 Token: $ERC20_TOKEN_ADDRESS"
 info "  - Forwarder: $AVACLOUD_FORWARDER"
+info "  - Config Contract: $CONFIG_CONTRACT_ADDRESS"
 
 # Initialize variables
 ERC20_HOME_ADDRESS=""
@@ -505,7 +509,8 @@ deploy_erc20_remote() {
         'Innovo USDC' \
         'IUSDC' \
         6 \
-        $AVACLOUD_FORWARDER"
+        $AVACLOUD_FORWARDER \
+        $CONFIG_CONTRACT_ADDRESS"
     
     log "Executing command: $command"
     
@@ -650,7 +655,7 @@ approve_tokens() {
     
     local command="cast send --private-key=$PRIVATE_KEY --rpc-url=$RPC_URL_HOME \
         $ERC20_TOKEN_ADDRESS \"approve(address,uint256)\" \
-        \"$ERC20_HOME_ADDRESS\" \"2\""
+        \"$ERC20_HOME_ADDRESS\" \"2000\""
     
     log "Executing approval command: $command"
     
@@ -678,7 +683,7 @@ send_tokens() {
     
     local command="cast send --private-key=$PRIVATE_KEY --rpc-url=$RPC_URL_HOME \
         $ERC20_HOME_ADDRESS \"send((bytes32,address,address,address,uint256,uint256,uint256,address),uint256)\" \
-        \"($BLOCKCHAIN_ID_REMOTE,$ERC20_REMOTE_ADDRESS,$MNG,$ERC20_TOKEN_ADDRESS,0,0,200000,0x0000000000000000000000000000000000000000)\" \"1\""
+        \"($BLOCKCHAIN_ID_REMOTE,$ERC20_REMOTE_ADDRESS,$MNG,$ERC20_TOKEN_ADDRESS,0,0,200000,0x0000000000000000000000000000000000000000)\" \"1000\""
     
     log "Executing send command: $command"
     
@@ -786,6 +791,9 @@ save_results() {
             "forwarder": "$AVACLOUD_FORWARDER",
             "signatory": "$MNG"
         },
+        "config": {
+            "configContractAddress": "$CONFIG_CONTRACT_ADDRESS"
+        },
         "status": "completed"
     }
 }
@@ -800,6 +808,7 @@ EOF
     log "  ERC20Remote Address: $ERC20_REMOTE_ADDRESS"
     log "  ERC20Remote TX Hash: $ERC20_REMOTE_TX_HASH"
     log "  Forwarder: $AVACLOUD_FORWARDER"
+    log "  Config Contract: $CONFIG_CONTRACT_ADDRESS"
     
     # Validate JSON if jq is available
     if command -v jq &> /dev/null || [[ -n "$jq_path" ]]; then
@@ -830,6 +839,7 @@ display_summary() {
     log "⚡ GASLESS CONFIGURATION:"
     log "  🔄 Forwarder:     $AVACLOUD_FORWARDER"
     log "  👤 Signatory:     $MNG"
+    log "  ⚙️  Config Contract: $CONFIG_CONTRACT_ADDRESS"
     log ""
     log "📁 FILES GENERATED:"
     log "  📄 Log file:      $LOG_FILE"

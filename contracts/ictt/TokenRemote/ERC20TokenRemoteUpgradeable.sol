@@ -23,6 +23,9 @@ import {ICMInitializable} from "@utilities/ICMInitializable.sol";
 import {ERC2771Recipient} from "../interfaces/ERC2771Recipient.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {ContextUpgradeable} from "@openzeppelin/contracts-upgradeable@5.0.2/utils/ContextUpgradeable.sol";
+import {ITokenLockerERC20} from "./interfaces/ITokenLockerERC20.sol";
+import {ConfigManagerUpgradeable} from "./ConfigManager.sol";
+import {IConfigs} from "./interfaces/IConfigs.sol";
 
 /**
  * @title ERC20TokenRemoteUpgradeable
@@ -34,7 +37,9 @@ contract ERC20TokenRemoteUpgradeable is
     IERC20TokenTransferrer, 
     ERC20Upgradeable, 
     TokenRemote,
-    ERC2771Recipient {
+    ERC2771Recipient,
+    ConfigManagerUpgradeable
+{
     using ECDSA for bytes32;
     
     // solhint-disable private-vars-leading-underscore
@@ -62,6 +67,8 @@ contract ERC20TokenRemoteUpgradeable is
     event DebugSpendAllowanceCalled(address indexed owner, address indexed spender, uint256 amount, uint256 currentAllowance);
     event DebugAllowanceCheck(address indexed owner, address indexed spender, uint256 required, uint256 available);
 
+    // Custom errors
+    error InsufficientUnlockedBalance();
 
 
     // solhint-disable ordering
@@ -98,9 +105,10 @@ contract ERC20TokenRemoteUpgradeable is
         string memory tokenName,
         string memory tokenSymbol,
         uint8 tokenDecimals,
-        address forwarder
+        address forwarder,
+        address config
     ) public initializer {
-        __ERC20TokenRemote_init(settings, tokenName, tokenSymbol, tokenDecimals, forwarder);
+        __ERC20TokenRemote_init(settings, tokenName, tokenSymbol, tokenDecimals, forwarder, config);
     }
 
     // solhint-disable-next-line func-name-mixedcase
@@ -109,11 +117,13 @@ contract ERC20TokenRemoteUpgradeable is
         string memory tokenName,
         string memory tokenSymbol,
         uint8 tokenDecimals,
-        address forwarder
+        address forwarder,
+        address config
     ) internal onlyInitializing {
         __ERC20_init(tokenName, tokenSymbol);
         __TokenRemote_init(settings, 0, tokenDecimals);
         __ERC20TokenRemote_init_unchained(tokenDecimals, forwarder);
+        _initConfigManager(config);
     }
 
     // solhint-disable-next-line func-name-mixedcase
@@ -303,4 +313,44 @@ contract ERC20TokenRemoteUpgradeable is
     function _msgData() internal view virtual override(ContextUpgradeable, ERC2771Recipient) returns (bytes calldata) {
         return ERC2771Recipient._msgData();
     }
+
+      /**
+   * @dev Updates the balances and total supply for token transfers, minting, and burning.
+   * This function replaces the deprecated _beforeTokenTransfer hook in OpenZeppelin v5.0.2.
+   *
+   * Calling conditions:
+   *
+   * - when `from` and `to` are both non-zero, `value` of ``from``'s tokens
+   *   will be transferred to `to`.
+   * - when `from` is zero, `value` tokens will be minted for `to`.
+   * - when `to` is zero, `value` of ``from``'s tokens will be burned.
+   * - `from` and `to` are never both zero.
+   */
+  function _update(address from, address to, uint256 value) internal override {
+    // Check token locking constraints before any operation that reduces balance
+    if (from != address(0)) {
+      address tokenLocker = configContract.erc20TokenLockerAddress(IConfigs.CurrencyType.USDC);
+
+      if (tokenLocker != address(0)) {
+        uint256 available = balanceOf(from) - ITokenLockerERC20(tokenLocker).getTotalLockedAmount(from);
+        if (value > available) {
+          revert InsufficientUnlockedBalance();
+        }
+      }
+    }
+    // Call the parent implementation to perform the actual balance updates
+    super._update(from, to, value);
+  }
+
+  /**
+   * @dev Updates the configuration contract address.
+   * Can only be called by an account with the CONFIG_MANAGER_ROLE.
+   * @param _configContract The new configuration contract address.
+   */
+  function updateConfigContract(address _configContract) external onlyConfigManager {
+    if (_configContract == address(0)) {
+      revert ZeroAddress();
+    }
+    configContract = IConfigs(_configContract);
+  }
 }

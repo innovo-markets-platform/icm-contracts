@@ -19,6 +19,7 @@ import {SendTokensInput} from "../interfaces/ITokenTransferrer.sol";
 import {Ownable} from "@openzeppelin/contracts@5.0.2/access/Ownable.sol";
 import {ICMInitializable} from "@utilities/ICMInitializable.sol";
 import {Initializable} from "@openzeppelin/contracts@5.0.2/proxy/utils/Initializable.sol";
+import {MockConfig} from "../mocks/MockConfig.sol";
 
 contract ERC20TokenRemoteTest is ERC20TokenTransferrerTest, TokenRemoteTest {
     using SafeERC20 for IERC20;
@@ -27,9 +28,13 @@ contract ERC20TokenRemoteTest is ERC20TokenTransferrerTest, TokenRemoteTest {
     string public constant MOCK_TOKEN_SYMBOL = "TST";
 
     ERC20TokenRemoteUpgradeable public app;
+    MockConfig public mockConfig;
 
     function setUp() public virtual override {
         TokenRemoteTest.setUp();
+
+        // Deploy mock config contract
+        mockConfig = new MockConfig();
 
         tokenDecimals = 14;
         tokenHomeDecimals = 18;
@@ -66,7 +71,8 @@ contract ERC20TokenRemoteTest is ERC20TokenTransferrerTest, TokenRemoteTest {
             MOCK_TOKEN_NAME,
             MOCK_TOKEN_SYMBOL,
             tokenDecimals,
-            address(0) // forwarder address for testing
+            address(0), // forwarder address for testing
+            address(mockConfig)  // config contract address for testing
         );
         assertEq(app.getBlockchainID(), DEFAULT_TOKEN_REMOTE_BLOCKCHAIN_ID);
     }
@@ -86,7 +92,8 @@ contract ERC20TokenRemoteTest is ERC20TokenTransferrerTest, TokenRemoteTest {
             MOCK_TOKEN_NAME,
             MOCK_TOKEN_SYMBOL,
             tokenDecimals,
-            address(0) // forwarder address for testing
+            address(0), // forwarder address for testing
+            address(mockConfig)  // config contract address for testing
         );
     }
 
@@ -221,7 +228,8 @@ contract ERC20TokenRemoteTest is ERC20TokenTransferrerTest, TokenRemoteTest {
             MOCK_TOKEN_NAME,
             MOCK_TOKEN_SYMBOL,
             tokenDecimals,
-            address(0) // forwarder address for testing
+            address(0), // forwarder address for testing
+            address(mockConfig)  // config contract address for testing
         );
         return instance;
     }
@@ -336,6 +344,6 @@ contract ERC20TokenRemoteTest is ERC20TokenTransferrerTest, TokenRemoteTest {
     ) private {
         app = new ERC20TokenRemoteUpgradeable(ICMInitializable.Allowed);
         vm.expectRevert(expectedErrorMessage);
-        app.initialize(settings, tokenName, tokenSymbol, tokenDecimals_, address(0));
+        app.initialize(settings, tokenName, tokenSymbol, tokenDecimals_, address(0), address(mockConfig));
     }
 }
